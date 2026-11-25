@@ -3,8 +3,8 @@
   "name": "devradar",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  // workers.dev bật để gọi POST /run. Bảo vệ bằng Cloudflare Access (đăng nhập), không có auth trong code; preview URLs vẫn tắt
-  "workers_dev": true,
+  // Tắt workers.dev; trang điều khiển truy cập qua domain riêng (gắn trong dashboard). Domain đó phải nằm sau Cloudflare Access: code không có auth.
+  "workers_dev": false,
   "preview_urls": false,
   // Chạy fetch handler (trang web) gần D1 ở APAC. Không ảnh hưởng cron.
   "placement": { "region": "aws:ap-southeast-1" },
