@@ -27,6 +27,7 @@ export const BLOGS: Source[] = [
   rss('Cloudflare', 'https://blog.cloudflare.com/rss/', 'backend'),
   rss('Netflix Tech', 'https://netflixtechblog.com/feed', 'backend'),
   rss('Engineering at Meta', 'https://engineering.fb.com/feed/', 'backend'),
+  rss('Instagram Engineering (Meta)', 'https://engineering.fb.com/tag/instagram/feed/', 'backend'),
   rss('GitHub Engineering', 'https://github.blog/engineering/feed/', 'backend'),
   rss('Stripe', 'https://stripe.com/blog/feed.rss', 'backend'),
   rss('Slack Engineering', 'https://slack.engineering/feed', 'backend'),
