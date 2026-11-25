@@ -1,4 +1,8 @@
-export interface RetryOpts {
+/** User-Agent của Chrome trên macOS (định dạng đã rút gọn, chỉ còn số phiên bản chính). Dùng chung cho mọi request ra ngoài. */
+export const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+
+interface RetryOpts {
   /** Số lần thử lại tối đa (không tính lần đầu). */
   retries?: number;
   /** Chờ tối đa mỗi lần; server yêu cầu chờ lâu hơn thì bỏ cuộc và trả luôn response. */

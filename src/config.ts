@@ -1,4 +1,4 @@
-export type Channel = 'backend' | 'ai' | 'security' | 'releases' | 'digest';
+export type Channel = 'backend' | 'ai' | 'security';
 
 export interface Source {
   name: string;
@@ -104,7 +104,7 @@ export const BLOGS: Source[] = [
   rss('Sourcegraph', 'https://sourcegraph.com/blog/rss.xml', 'backend'),
   rss('Martin Fowler', 'https://martinfowler.com/feed.atom', 'backend'),
   rss('Baeldung', 'https://www.baeldung.com/feed', 'backend'),
-  rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend'),
+  rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend', false) /* tắt: chặn UA trình duyệt (403) */,
 
   // ---- Bảo mật / CVE / lỗ hổng ----
   rss('Spring Security Advisories', 'https://spring.io/security.atom', 'security'),
@@ -128,11 +128,9 @@ export const BLOGS: Source[] = [
   rss('Amazon Science', 'https://www.amazon.science/index.rss', 'ai'),
 ];
 
-export const ENABLED_BLOGS = BLOGS.filter((s) => s.enabled);
+export const SOURCES: Source[] = BLOGS.filter((s) => s.enabled);
 
-export const SOURCES: Source[] = ENABLED_BLOGS;
-
-/** Tối đa số bài gửi mỗi lần chạy (mỗi bài 1 tin/sink, ~1,1s/tin). Phần dư để lần sau. Workers Paid: 10.000 subrequest. */
+/** Tối đa số bài gửi mỗi lần chạy (mỗi bài một card, cách nhau ~1,1s). Phần dư để lần sau. */
 export const MAX_PER_RUN = 30;
 /** Bỏ bài cũ hơn N ngày (nếu parse được ngày). */
 export const MAX_AGE_DAYS = 3;

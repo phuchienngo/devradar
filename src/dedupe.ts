@@ -1,6 +1,6 @@
 const TRACKING = /^(utm_|fbclid|gclid|mc_|ref$|ref_src$|source$)/i;
 
-export function normalizeUrl(raw: string): string {
+function normalizeUrl(raw: string): string {
   try {
     const u = new URL(raw);
     u.hash = '';

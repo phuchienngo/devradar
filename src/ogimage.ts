@@ -1,5 +1,5 @@
 import { perHost } from './hosts';
-import { fetchRetry } from './http';
+import { fetchRetry, USER_AGENT } from './http';
 
 const MAX_BYTES = 120_000;
 const META = /<meta\b[^>]*>/gi;
@@ -8,11 +8,11 @@ const decode = (s: string) => s.replace(/&amp;/g, '&').replace(/&#x27;|&#39;/g, 
 const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'))?.[1];
 
 /** Lấy og:image (hoặc twitter:image) của một trang; null nếu không có/lỗi. Chỉ đọc phần đầu HTML. */
-export async function fetchOgImage(pageUrl: string): Promise<string | null> {
+async function fetchOgImage(pageUrl: string): Promise<string | null> {
   try {
     const res = await fetchRetry(
       pageUrl,
-      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; devradar/0.1)', accept: 'text/html' }, redirect: 'follow' },
+      { headers: { 'user-agent': USER_AGENT, accept: 'text/html' }, redirect: 'follow' },
       { retries: 2, maxWaitMs: 8000, timeoutMs: 8000 },
     );
     if (!res.ok || !res.body) return null;

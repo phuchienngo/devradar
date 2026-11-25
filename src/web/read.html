@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>{{title}} · devradar</title>
+{{{head}}}
+<script src="https://cdn.jsdelivr.net/npm/marked@18.3.0/lib/marked.umd.js"
+  integrity="sha384-hH4NOxDIQY57RnVrD2fqqLH/RL4DK2iPPnw/nHh2KuepyxA6z62hUUPNnuXf6AMX" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.5.0/dist/purify.min.js"
+  integrity="sha384-DOUwTXbuiiQxlONuue5N42674XXDfjIJ/LTPtJMZ2ZV1Ir4NRQ3OnM/yM505YQAc" crossorigin="anonymous"></script>
+<style>
+  #doc { line-height:1.75; font-size:1.05rem; overflow-wrap:anywhere; }
+  #doc img { max-width:100%; height:auto; border-radius:6px; }
+  #doc pre { background:var(--bs-tertiary-bg); border:1px solid var(--bs-border-color); padding:12px 14px; border-radius:8px; overflow:auto; line-height:1.5; font-size:.9rem; }
+  #doc code { font-size:.9em; } #doc :not(pre) > code { background:var(--bs-tertiary-bg); padding:1px 5px; border-radius:4px; }
+  #doc blockquote { border-left:4px solid var(--bs-border-color); margin:0 0 1rem; padding:.25rem 1rem; color:var(--bs-secondary-color); }
+  #doc table { border-collapse:collapse; } #doc td, #doc th { border:1px solid var(--bs-border-color); padding:4px 8px; }
+  #raw { white-space:pre-wrap; margin:0; font:inherit; }
+</style>
+</head>
+<body class="bg-body-tertiary">
+<main class="container py-4" style="max-width:780px">
+  <a href="/" class="text-decoration-none small">← Quay lại</a>
+  <h1 class="h3 mt-2">{{title}}</h1>
+  <div class="text-body-secondary small mb-3">
+    {{source}} · {{dates}} ·
+    <a href="{{url}}" target="_blank" rel="noopener noreferrer">bản gốc ↗</a> ·
+    <a href="/read?id={{id}}&amp;format=md">⬇ .md</a>
+  </div>
+  <div class="alert alert-secondary small">Bản lưu Markdown để tra cứu cá nhân; ảnh vẫn tải từ site gốc nên có thể mất nếu họ xoá.</div>
+  <article id="doc" class="card card-body shadow-sm"><pre id="raw">{{body}}</pre></article>
+</main>
+<script>
+  // Có marked + DOMPurify thì render; không (CDN lỗi) thì giữ nguyên bản Markdown thô ở trên.
+  if (window.marked && window.DOMPurify) {
+    DOMPurify.addHook('afterSanitizeAttributes', (n) => {
+      if (n.tagName === 'A') { n.setAttribute('target', '_blank'); n.setAttribute('rel', 'noopener noreferrer'); }
+      if (n.tagName === 'IMG') { n.setAttribute('loading', 'lazy'); n.setAttribute('referrerpolicy', 'no-referrer'); }
+    });
+    const doc = document.getElementById('doc');
+    doc.innerHTML = DOMPurify.sanitize(marked.parse(document.getElementById('raw').textContent));
+  }
+</script>
+</body>
+</html>

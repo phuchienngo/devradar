@@ -4,7 +4,7 @@ Bot chạy trên Cloudflare Workers: mỗi giờ quét ~80 engineering blog / ad
 và gửi **mỗi bài một card** vào Google Chat. Không dùng LLM, không lọc theo từ khoá.
 
 - Dedupe, lịch sử và khoá chống chạy chồng đều nằm trong **Cloudflare D1**.
-- Có trang web (`GET /`) để xem trước / chạy tay và **tìm lại lịch sử** (full-text search).
+- Có trang web (`GET /`) để chạy tay, **tìm lại lịch sử** (full-text search) và đọc lại **bản lưu nội dung bài dạng Markdown** (`/read`), phòng khi bài bị xoá.
 - Deploy bằng `npm run deploy` (workflow GitHub Actions đã được gỡ tạm).
 
 ## Luồng chạy
@@ -13,6 +13,7 @@ và gửi **mỗi bài một card** vào Google Chat. Không dùng LLM, không l
 cron (mỗi giờ, UTC)  ─┐
 nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed ─► bỏ bài đã gửi (D1) / quá 3 ngày
                                          ─► cũ → mới, tối đa 30 bài ─► Google Chat (1 card/bài, có ảnh og:image)
+                                         ─► lưu nội dung bài (Markdown, từ feed hoặc tải trang)
                                          ─► ghi bài đã gửi vào D1 (vừa là lịch sử vừa là dedupe)
 ```
 
@@ -25,14 +26,18 @@ nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed ─► b�
 
 | File | Việc |
 |---|---|
-| `src/index.ts` | `scheduled` (cron) + `fetch` (trang web, `/history`, `/run`), khoá, điều phối |
+| `src/index.ts` | `scheduled` (cron) + `fetch` (trang web, `/history`, `/read`, `/run`), khoá, điều phối |
 | `src/config.ts` | **Danh sách nguồn** và các hằng số (`MAX_PER_RUN`, `MAX_AGE_DAYS`) |
 | `src/sources.ts` | Parse RSS/Atom |
+| `src/archive.ts` | Lưu nội dung bài (feed hoặc tải trang → Markdown), thử lại bài trượt |
+| `src/text.ts` | HTML → Markdown, giải mã entity |
+| `src/hosts.ts` | Chạy song song theo host, cùng host thì tuần tự (tránh 429) |
 | `src/dedupe.ts` | Chuẩn hoá URL, hash |
 | `src/history.ts` | D1: tự tạo bảng, dedupe, khoá, ghi và tìm kiếm (FTS5) |
 | `src/gchat.ts` | Dựng card, gửi Google Chat |
 | `src/ogimage.ts` | Lấy ảnh preview |
-| `src/ui.ts` | Trang điều khiển (Bootstrap 5.3 qua CDN) |
+| `src/pages.ts` + `src/web/*.html` | Trang điều khiển và trang đọc bản lưu: template là file HTML thật (Bootstrap 5.3 qua CDN) |
+| `src/template.ts` | Template kiểu Mustache cỡ 10 dòng: `{{x}}` tự escape, `{{{x}}}` chèn nguyên văn |
 
 ## Chuẩn bị (làm một lần)
 
@@ -48,7 +53,7 @@ Yêu cầu: Node 22+, tài khoản Cloudflare **gói Workers Paid** (bot cần n
    ```sh
    npx wrangler d1 create devradar-history
    ```
-   Bảng và index tự tạo ở lần chạy đầu, **không cần migration**.
+   Bảng và index tự tạo ở lần chạy đầu, **không cần migration**. 
 4. **Secret của Worker:**
    ```sh
    npx wrangler secret put GOOGLE_CHAT_WEBHOOK_URL
@@ -91,11 +96,12 @@ npm run typecheck
 
 - **Gửi lại từ đầu:** xoá dữ liệu D1 (`DELETE FROM articles` qua `wrangler d1 execute devradar-history --remote`). Lượt sau sẽ gửi lại các bài ≤ 3 ngày.
 - **Export D1:** D1 không export được database có virtual table. Xoá `articles_fts` trước khi export; nó dựng lại được từ bảng `articles` (bảng tự tạo lại khi Worker chạy).
-- **Tìm kiếm** trên trang: FTS5 trên tiêu đề + tóm tắt + nguồn (bỏ dấu tiếng Việt, gõ dở từ vẫn khớp). Chuỗi có `/` được coi là tìm theo link.
+- **Tìm kiếm** trên trang: FTS5 trên tiêu đề + tóm tắt + nội dung + nguồn (bỏ dấu tiếng Việt, gõ dở từ vẫn khớp). Chuỗi có `/` được coi là tìm theo link.
+- **Bản lưu nội dung:** lưu Markdown trong cột `body` (tối đa 100.000 ký tự/bài). Bài mới tự lưu khi gửi; bài trượt được cron thử lại tối đa 3 lần. Xem ở `/read?id=…`, tải `.md` bằng `&format=md`. Trang dựng bằng JS hoặc chặn bot có thể không lấy được.
 - **Khoá:** bảng `locks` chống cron và nút bấm chạy chồng nhau, tự hết hạn sau 10 phút.
 
 ## Giới hạn đã biết
 
 - Placement (`aws:ap-southeast-1`) chỉ áp dụng cho `fetch` (trang web), không áp dụng cho cron.
 - Một số blog không có RSS công khai hoặc chặn bot (Uber, LinkedIn, DoorDash…), nên không có trong danh sách.
-- Chỉ lưu **tóm tắt trong feed**, không tải toàn bộ bài.
+- Bản lưu chỉ là Markdown: ảnh vẫn trỏ về site gốc (mất nếu họ xoá), bảng và danh sách lồng nhau bị làm phẳng. Dùng cho tra cứu cá nhân, đừng đăng lại.

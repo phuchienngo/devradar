@@ -1,13 +1,13 @@
 import { perHost } from './hosts';
-import { backfillCandidates, countMissingBodies, saveBody } from './history';
-import { fetchRetry } from './http';
+import { backfillCandidates, saveBody } from './history';
+import { fetchRetry, USER_AGENT } from './http';
 import { htmlToMarkdown } from './text';
 import type { Env, Item } from './types';
 
 /** Feed đã kèm nội dung dài hơn mức này thì coi là đủ bài, khỏi tải trang. */
-export const FEED_FULL_MIN = 1500;
+const FEED_FULL_MIN = 1500;
 /** Giới hạn mỗi bài (ký tự) để không phình D1. */
-export const BODY_MAX_CHARS = 100_000;
+const BODY_MAX_CHARS = 100_000;
 const MAX_HTML_BYTES = 2_000_000;
 const MIN_PAGE_CHARS = 200; // ít hơn: trang render bằng JS hoặc bị chặn, coi như không lấy được
 const BACKFILL_PER_RUN = 10;
@@ -40,11 +40,11 @@ function mainText(rawHtml: string, base: string): string {
 }
 
 /** Tải trang và bóc văn bản; '' nếu lỗi / không phải HTML / gần như trống. */
-export async function fetchArticleText(url: string): Promise<string> {
+async function fetchArticleText(url: string): Promise<string> {
   try {
     const res = await fetchRetry(
       url,
-      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; devradar/0.1)', accept: 'text/html,application/xhtml+xml' }, redirect: 'follow' },
+      { headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' }, redirect: 'follow' },
       { retries: 2, maxWaitMs: 8000, timeoutMs: 15_000 },
     );
     if (!res.ok || !res.body || !/html|xml/i.test(res.headers.get('content-type') ?? 'html')) return '';
@@ -82,17 +82,11 @@ export async function archiveBodies(items: Item[]): Promise<string[]> {
   );
 }
 
-/**
- * Lưu nội dung cho các bài còn trống. Cron gọi mặc định (bài gần đây, tối đa 3 lần);
- * nút bấm tay dùng force + limit lớn hơn. Trả về số bài lưu thêm được và số bài còn trống.
- */
-export async function backfillBodies(env: Env, opts: { force?: boolean; limit?: number } = {}): Promise<{ filled: number; remaining: number }> {
-  const pending = await backfillCandidates(env, opts.limit ?? BACKFILL_PER_RUN, opts.force ?? false);
-  let filled = 0;
-  if (pending.length) {
-    const texts = await perHost(pending.map((p) => p.url), (u) => fetchArticleText(u), '');
-    await Promise.all(pending.map((p, i) => saveBody(env, p.id, texts[i] ?? '')));
-    filled = texts.filter(Boolean).length;
-  }
-  return { filled, remaining: await countMissingBodies(env) };
+/** Thử lại các bài gần đây chưa lưu được nội dung (tối đa 3 lần mỗi bài). Trả về số bài lưu thêm được. */
+export async function backfillBodies(env: Env): Promise<number> {
+  const pending = await backfillCandidates(env, BACKFILL_PER_RUN);
+  if (!pending.length) return 0;
+  const texts = await perHost(pending.map((p) => p.url), (u) => fetchArticleText(u), '');
+  await Promise.all(pending.map((p, i) => saveBody(env, p.id, texts[i] ?? '')));
+  return texts.filter(Boolean).length;
 }

@@ -1,5 +1,5 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
-import { fetchRetry } from './http';
+import { fetchRetry, USER_AGENT } from './http';
 import { decode, htmlToMarkdown, stripTags } from './text';
 import type { Item } from './types';
 
@@ -22,7 +22,7 @@ function linkOf(block: string): string | null {
   return null;
 }
 
-export function parseFeed(xml: string, src: Source): Item[] {
+function parseFeed(xml: string, src: Source): Item[] {
   const blocks = xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) ?? [];
   const items: Item[] = [];
   for (const b of blocks.slice(0, 15)) {
@@ -53,7 +53,7 @@ export async function fetchSource(src: Source): Promise<Item[]> {
   const res = await fetchRetry(
     src.url,
     {
-      headers: { 'user-agent': 'devradar/0.1 (+rss reader)', accept: 'application/rss+xml, application/atom+xml, text/xml, */*' },
+      headers: { 'user-agent': USER_AGENT, accept: 'application/rss+xml, application/atom+xml, text/xml, */*' },
       redirect: 'follow',
     },
     { retries: 2, maxWaitMs: 10_000, timeoutMs: FETCH_TIMEOUT_MS },

@@ -5,13 +5,11 @@ import { sendTextToGoogleChat, sendToGoogleChat } from './gchat';
 import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, releaseLock } from './history';
 import { fetchSource } from './sources';
 import type { Env, Item } from './types';
-import { PAGE, renderArticle } from './ui';
+import { PAGE, renderArticle } from './pages';
 
 export interface RunResult {
   summary: string;
   errors: string[];
-  /** Chỉ có ở dry-run: các bài sẽ được gửi. */
-  wouldSend?: { title: string; source: string; url: string }[];
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -23,9 +21,8 @@ async function notify(env: Env, text: string): Promise<void> {
 
 /**
  * Mỗi bước được cô lập: một nguồn lỗi hay một lệnh ghi D1 lỗi chỉ làm mất phần việc của nó.
- * dry = true: chỉ xem sẽ gửi gì; không gửi, không ghi D1, không báo lỗi.
  */
-export async function run(env: Env, dry = false): Promise<RunResult> {
+export async function run(env: Env): Promise<RunResult> {
   const errors: string[] = [];
 
   // 1. Nguồn: mỗi nguồn độc lập
@@ -42,7 +39,7 @@ export async function run(env: Env, dry = false): Promise<RunResult> {
     seen = await loadSeen(env);
   } catch (e) {
     errors.push(`D1: không đọc được danh sách đã gửi (${msg(e)})`);
-    if (!dry) await notify(env, errors.join('\n'));
+    await notify(env, errors.join('\n'));
     return { summary: 'aborted: không đọc được D1', errors };
   }
   const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
@@ -63,14 +60,6 @@ export async function run(env: Env, dry = false): Promise<RunResult> {
   // 3. Cũ → mới để đọc theo thứ tự thời gian; phần vượt MAX_PER_RUN gửi ở lần sau.
   fresh.sort((a, b) => (a.publishedAt ?? 0) - (b.publishedAt ?? 0));
   const toSend = fresh.slice(0, MAX_PER_RUN);
-  if (dry) {
-    return {
-      summary: `DRY ${base} would_send=${toSend.length} errors=${errors.length}`,
-      errors,
-      wouldSend: toSend.map((i) => ({ title: i.title, source: i.source, url: i.url })),
-    };
-  }
-
   // 4. Gửi; chỉ bài đã gửi được mới bị đánh dấu, bài còn lại thử lại ở lượt sau.
   let sent: Item[] = [];
   try {
@@ -99,7 +88,7 @@ export async function run(env: Env, dry = false): Promise<RunResult> {
   // 7. Thử lại các bài gần đây chưa lưu được nội dung
   let backfilled = 0;
   try {
-    backfilled = (await backfillBodies(env)).filled;
+    backfilled = await backfillBodies(env);
   } catch (e) {
     console.warn(`backfill: ${msg(e)}`);
   }
@@ -147,7 +136,7 @@ export default {
   /**
    * GET /  → trang có nút "Xem trước" / "Chạy ngay" và mục lịch sử (dùng trong trình duyệt).
    * GET /history?q=&source=&page= → dữ liệu lịch sử cho trang.
-   * POST /run[?dry=1] → do chính trang đó gọi. KHÔNG có xác thực trong code:
+   * POST /run → do chính trang đó gọi. KHÔNG có xác thực trong code:
    * phải bật Cloudflare Access cho workers.dev trước khi deploy.
    */
   async fetch(req, env, ctx) {
@@ -175,21 +164,11 @@ export default {
       }
       return new Response(renderArticle(a), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     }
-    if (url.pathname === '/backfill') {
-      if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });
-      if (!sameOrigin(req, url)) return new Response('Forbidden', { status: 403 });
-      try {
-        return Response.json(await backfillBodies(env, { force: true, limit: 40 }));
-      } catch (e) {
-        return Response.json({ error: msg(e) }, { status: 500 });
-      }
-    }
     if (url.pathname !== '/run') return new Response('Not found', { status: 404 });
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });
     if (!sameOrigin(req, url)) return new Response('Forbidden', { status: 403 });
 
-    const dry = url.searchParams.get('dry') === '1';
-    const job = dry ? run(env, true) : runLocked(env);
+    const job = runLocked(env);
     ctx.waitUntil(job.catch(() => {})); // vẫn chạy tiếp nếu client ngắt kết nối
     try {
       return Response.json(await job);
