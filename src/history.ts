@@ -41,7 +41,6 @@ const BASE = [
 // Full-text search (FTS5) trên tiêu đề + tóm tắt + nội dung + nguồn; bỏ dấu để "toi uu" khớp "Tối ưu".
 // content='articles': FTS chỉ giữ chỉ mục, văn bản vẫn nằm ở bảng articles.
 const INDEXES = [
-  'CREATE INDEX IF NOT EXISTS idx_articles_sent_at ON articles (sent_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source, sent_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_articles_pending ON articles (sent, published_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_articles_crawl ON articles (crawled, published_at DESC)',
@@ -71,17 +70,6 @@ let ready: Promise<unknown> | null = null;
 function ensureSchema(env: Env): Promise<unknown> {
   ready ??= (async () => {
     await env.DB.batch(BASE.map((q) => env.DB.prepare(q)));
-    // TẠM THỜI: DB đang chạy chưa có cột `crawled`. Xoá nhánh này sau khi bản có cột này đã deploy và chạy một lần.
-    const cols = await env.DB.prepare("SELECT name FROM pragma_table_info('articles')").all<{ name: string }>();
-    if (!cols.results.some((c) => c.name === 'crawled')) {
-      // Bài chỉ có nội dung ngắn từ feed (chưa tải trang, chưa bỏ cuộc) vào hàng đợi crawl; còn lại coi như xong
-      await env.DB.prepare('ALTER TABLE articles ADD COLUMN crawled INTEGER NOT NULL DEFAULT 1').run();
-      await env.DB.prepare(
-        `UPDATE articles SET crawled = 0 WHERE channel <> 'paper' AND length(body) < ?1 AND body_tries < ?2`,
-      )
-        .bind(FULL_TEXT_MIN_CHARS, MAX_CRAWL_TRIES)
-        .run();
-    }
     await env.DB.batch(INDEXES.map((q) => env.DB.prepare(q)));
     await env.DB.batch(FTS.map((q) => env.DB.prepare(q)));
   })().catch((e) => {
@@ -144,19 +132,18 @@ interface Pending {
   item: Item;
 }
 
-/** `limit` bài chưa gửi mới nhất (ngày xuất bản không vượt quá lúc lưu, tránh bài ghi ngày tương lai chen lên đầu). */
+/** `limit` bài chưa gửi, chọn ngẫu nhiên (chọn id trước rồi mới đọc cột, để không phải sắp xếp cả cột nội dung của hàng chờ). */
 export async function pendingToSend(env: Env, limit: number): Promise<Pending[]> {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
     `SELECT id, url, title, summary, body, source, channel, published_at AS publishedAt
-     FROM articles WHERE sent = 0
-     ORDER BY MIN(COALESCE(published_at, sent_at), sent_at) DESC, id LIMIT ?`,
+     FROM articles WHERE id IN (SELECT id FROM articles WHERE sent = 0 ORDER BY RANDOM() LIMIT ?)`,
   )
     .bind(limit)
     .all<{ id: string; url: string; title: string; summary: string; body: string; source: string; channel: string; publishedAt: number | null }>();
   return results.map((r) => ({
     id: r.id,
-    item: { url: r.url, title: r.title, source: r.source, channel: r.channel, publishedAt: r.publishedAt, snippet: r.summary, content: r.body },
+    item: { id: r.id, url: r.url, title: r.title, source: r.source, channel: r.channel, publishedAt: r.publishedAt, snippet: r.summary, content: r.body },
   }));
 }
 

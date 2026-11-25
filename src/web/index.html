@@ -23,11 +23,11 @@
 </head>
 <body class="bg-body-tertiary">
 <header class="bg-body border-bottom">
-  <div class="container py-3" style="max-width:860px">
+  <div class="container py-3" style="max-width:1200px">
     <div class="row g-3 align-items-center">
       <div class="col-12 col-sm">
         <h1 class="h4 mb-0">devradar</h1>
-        <div class="text-body-secondary small">Tin kỹ thuật từ các engineering blog, gửi về Google Chat mỗi giờ một bài.</div>
+        <div class="text-body-secondary small">Tin kỹ thuật từ các engineering blog, gửi về Google Chat mỗi giờ một bài ngẫu nhiên.</div>
       </div>
       <div class="col-12 col-sm-auto d-flex gap-2">
         <button id="run" class="btn btn-primary w-100">Chạy ngay</button>
@@ -35,7 +35,7 @@
     </div>
   </div>
 </header>
-<main class="container py-3 pb-5" style="max-width:860px">
+<main class="container py-3 pb-5" style="max-width:1200px">
   <div id="out" class="card shadow-sm mb-3 d-none"><div class="card-body">
     <div id="sum" class="text-body-secondary"></div>
     <div id="errs" class="err text-danger small mt-2"></div>
@@ -50,7 +50,7 @@
     <div class="col-5 col-md-2"><select id="sent" class="form-select form-select-lg fs-6"><option value="">Tất cả</option><option value="1">Đã gửi</option><option value="0">Chưa gửi</option></select></div>
   </div></div>
   <div id="hmsg" class="text-body-secondary small my-2" style="min-height:1.4em"></div>
-  <ul id="hist" class="list-unstyled d-grid gap-2 mb-0"></ul>
+  <ul id="hist" class="list-unstyled row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2 mb-0"></ul>
   <div class="d-flex align-items-center justify-content-between mt-3 text-body-secondary small">
     <button id="prev" class="btn btn-outline-primary btn-sm">← Trước</button><span id="pinfo"></span><button id="next" class="btn btn-outline-primary btn-sm">Sau →</button>
   </div>
@@ -58,7 +58,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 async function go() {
-  if (!confirm('Chạy ngay? Bot sẽ đọc feed, lưu bài mới và gửi 1 bài vào Google Chat.')) return;
+  if (!confirm('Chạy ngay? Bot sẽ đọc feed, lưu bài mới, gửi 1 bài vào Google Chat và crawl nội dung.')) return;
   const btn = $('run');
   btn.disabled = true;
   $('out').classList.remove('d-none');
@@ -117,7 +117,8 @@ function avatar(source, site) {
 }
 
 function card(r, hl, logos) {
-  const li = document.createElement('li'); li.className = 'card card-item shadow-sm';
+  const li = document.createElement('li'); li.className = 'col';
+  const box = document.createElement('div'); box.className = 'card card-item shadow-sm h-100';
   const row = document.createElement('div'); row.className = 'card-body d-flex gap-3 p-3';
   const ava = avatar(r.source, logos[r.source]);
   const body = document.createElement('div'); body.className = 'flex-grow-1 min-w-0'; body.style.minWidth = '0';
@@ -140,14 +141,14 @@ function card(r, hl, logos) {
   body.append(a, m);
   const text = r.excerpt || (r.summary || '').slice(0, 220);
   if (text) body.append(excerpt(text, hl));
-  row.append(ava, body); li.append(row);
+  row.append(ava, body); box.append(row); li.append(box);
   return li;
 }
 
 async function loadHist() {
   const my = ++seq;
   $('hmsg').textContent = '';
-  $('hist').replaceChildren(...[1, 2, 3].map(() => { const s = document.createElement('li'); s.className = 'card placeholder-glow'; const p = document.createElement('div'); p.className = 'card-body'; const l = document.createElement('span'); l.className = 'placeholder col-8'; const l2 = document.createElement('span'); l2.className = 'placeholder col-5 mt-2 d-block'; p.append(l, l2); s.append(p); return s; }));
+  $('hist').replaceChildren(...[1, 2, 3].map(() => { const s = document.createElement('li'); s.className = 'col placeholder-glow'; const c = document.createElement('div'); c.className = 'card'; const p = document.createElement('div'); p.className = 'card-body'; const l = document.createElement('span'); l.className = 'placeholder col-8'; const l2 = document.createElement('span'); l2.className = 'placeholder col-5 mt-2 d-block'; p.append(l, l2); c.append(p); s.append(c); return s; }));
   const qs = new URLSearchParams({ q: $('q').value.trim(), source: $('src').value, sent: $('sent').value, page: String(page) });
   try {
     const res = await fetch('/history?' + qs);
@@ -161,7 +162,7 @@ async function loadHist() {
       for (const s of d.sources) { const o = document.createElement('option'); o.value = s; o.textContent = s; $('src').append(o); }
     }
     if (d.rows.length === 0) {
-      const e = document.createElement('li'); e.className = 'text-center text-body-secondary py-5';
+      const e = document.createElement('li'); e.className = 'col-12 text-center text-body-secondary py-5';
       e.textContent = $('q').value || $('src').value || $('sent').value ? 'Không tìm thấy bài nào khớp.' : 'Chưa có bài nào.';
       $('hist').replaceChildren(e);
     } else {

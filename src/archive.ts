@@ -1,5 +1,5 @@
 import { perHost } from './hosts';
-import { CRAWL_PER_RUN } from './config';
+import { CRAWL_BUDGET_MS, CRAWL_PER_RUN } from './config';
 import { pendingCrawl, saveCrawl } from './history';
 import { fetchRetry, USER_AGENT } from './http';
 import { htmlToMarkdown } from './text';
@@ -64,14 +64,16 @@ async function fetchArticleText(url: string): Promise<string> {
   }
 }
 
-/** Tải nội dung đầy đủ của CRAWL_PER_RUN bài đã lưu (mới nhất trước) vì bài có thể bị xoá về sau. Trả về số bài tải được. */
+/**
+ * Tải nội dung đầy đủ của CRAWL_PER_RUN bài đã lưu (mới nhất trước) vì bài có thể bị xoá về sau. Quá CRAWL_BUDGET_MS thì bỏ qua
+ * phần còn lại (không tính là một lần thử lỗi). Trả về số bài tải được.
+ */
 export async function crawlBodies(env: Env): Promise<number> {
   const rows = await pendingCrawl(env, CRAWL_PER_RUN);
   if (!rows.length) return 0;
-  const pages = await perHost(rows.map((r) => r.url), (u) => fetchArticleText(u), '');
-  await saveCrawl(
-    env,
-    rows.map((r, i) => ({ id: r.id, body: pages[i] ? (pages[i]!.length > r.body.length ? pages[i]! : r.body) : null })),
-  );
+  const deadline = Date.now() + CRAWL_BUDGET_MS;
+  const pages = await perHost<string | null>(rows.map((r) => r.url), async (u) => (Date.now() > deadline ? null : fetchArticleText(u)), '');
+  const done = rows.flatMap((r, i) => (pages[i] === null ? [] : [{ id: r.id, body: pages[i] ? (pages[i]!.length > r.body.length ? pages[i]! : r.body) : null }]));
+  await saveCrawl(env, done);
   return pages.filter(Boolean).length;
 }

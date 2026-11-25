@@ -22,7 +22,6 @@ const BLOGS: Source[] = [
   rss('Cloudflare', 'https://blog.cloudflare.com/rss/', 'backend'),
   rss('Netflix Tech', 'https://netflixtechblog.com/feed', 'backend'),
   rss('Engineering at Meta', 'https://engineering.fb.com/feed/', 'backend'),
-  rss('Instagram Engineering (Meta)', 'https://engineering.fb.com/tag/instagram/feed/', 'backend'),
   rss('GitHub Engineering', 'https://github.blog/engineering/feed/', 'backend'),
   rss('Stripe', 'https://stripe.com/blog/feed.rss', 'backend'),
   rss('Slack Engineering', 'https://slack.engineering/feed', 'backend'),
@@ -170,7 +169,7 @@ export const PAPER_WINDOW_DAYS = 365;
 /** Tên miền để lấy logo khi khác tên miền gốc của feed (blog nằm trên Medium/GitHub, logo công ty ở tên miền khác) và logo hội nghị cho paper. */
 const SITE_OVERRIDES: Record<string, string> = {
   'Engineering at Meta': 'meta.com',
-  'Instagram Engineering (Meta)': 'instagram.com',
+  'Instagram Engineering (Meta)': 'instagram.com', // nguồn đã gỡ (trùng feed Meta) nhưng các bài đã lưu vẫn mang nhãn này
   'GitHub Engineering': 'github.com',
   'Spotify Engineering': 'spotify.com',
   'Shopify Engineering': 'shopify.com',
@@ -224,12 +223,14 @@ const PAPERS: Source = { name: 'Paper (hội nghị lớn)', type: 'papers', url
 
 export const SOURCES: Source[] = [...BLOGS, PAPERS].filter((s) => s.enabled);
 
-/** Số bài gửi Google Chat mỗi giờ (card cách nhau ~1,1 s). Phần còn lại ở sent = 0 để các lượt sau. */
+/** Số bài gửi Google Chat mỗi giờ, chọn ngẫu nhiên trong hàng chờ (sent = 0). Nhiều bài thì card cách nhau ~1,1 s. */
 export const MAX_PER_RUN = 1;
 /** Số bài mới lưu vào D1 mỗi lượt, mới → cũ. Lưu không gửi gì nên cho nhiều hơn số bài gửi. */
 export const MAX_INGEST_PER_RUN = 1000;
 /** Số bài crawl nội dung đầy đủ mỗi lượt (mỗi giờ). */
 export const CRAWL_PER_RUN = 100;
+/** Thời gian tối đa (ms) cho bước crawl mỗi lượt; hết giờ thì dừng, bài chưa tải để lượt sau (giữ lượt chạy trong hạn khoá 10 phút). */
+export const CRAWL_BUDGET_MS = 180_000;
 /** Nội dung từ feed dài hơn mức này (ký tự) thì coi là đủ bài, khỏi tải trang. */
 export const FULL_TEXT_MIN_CHARS = 1500;
 export const MAX_CRAWL_TRIES = 3;

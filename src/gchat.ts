@@ -6,16 +6,16 @@ const ICON: Record<string, string> = { backend: '⚙️', ai: '🤖', security: 
 
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-function card(it: Item, n: number, image: string | null) {
+function card(it: Item, n: number, image: string | null, siteUrl?: string) {
   const widgets: unknown[] = [];
   if (image) widgets.push({ image: { imageUrl: image, altText: it.title.slice(0, 100), onClick: { openLink: { url: it.url } } } });
   if (it.snippet) {
     const snip = it.snippet.slice(0, 220) + (it.snippet.length > 220 ? '…' : '');
     widgets.push({ textParagraph: { text: escHtml(snip) } });
   }
-  widgets.push({
-    buttonList: { buttons: [{ text: 'Đọc bài', onClick: { openLink: { url: it.url } } }] },
-  });
+  const buttons = [{ text: 'Đọc bài', onClick: { openLink: { url: it.url } } }];
+  if (siteUrl && it.id && it.content) buttons.push({ text: 'Bản lưu', onClick: { openLink: { url: `${siteUrl}/read?id=${it.id}` } } });
+  widgets.push({ buttonList: { buttons } });
   return {
     cardId: `item-${n}`,
     card: {
@@ -43,7 +43,7 @@ export async function sendToGoogleChat(env: Env, items: Item[]): Promise<{ sent:
   for (const [i, it] of items.entries()) {
     if (i > 0) await new Promise((r) => setTimeout(r, 1100));
     try {
-      await post(env.GOOGLE_CHAT_WEBHOOK_URL, { cardsV2: [card(it, i, images[i] ?? null)] });
+      await post(env.GOOGLE_CHAT_WEBHOOK_URL, { cardsV2: [card(it, i, images[i] ?? null, env.SITE_URL)] });
       sent.push(it);
     } catch (e) {
       return { sent, error: (e as Error).message };

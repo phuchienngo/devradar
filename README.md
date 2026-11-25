@@ -1,7 +1,7 @@
 # 📡 devradar
 
 Bot chạy trên Cloudflare Workers: mỗi giờ quét ~85 engineering blog / advisory bảo mật qua RSS/Atom, lưu bài mới vào D1
-và gửi **mỗi giờ một bài** (một card) vào Google Chat, đồng thời tải dần nội dung đầy đủ của các bài đã lưu. Không dùng LLM, không lọc theo từ khoá.
+và gửi **mỗi giờ một bài ngẫu nhiên** (một card) vào Google Chat, đồng thời tải dần nội dung đầy đủ của các bài đã lưu. Không dùng LLM, không lọc theo từ khoá.
 
 - Dedupe, lịch sử và khoá chống chạy chồng đều nằm trong **Cloudflare D1**.
 - Có trang web (`GET /`) để chạy tay, **tìm lại lịch sử** (full-text search) và đọc lại **bản lưu nội dung bài dạng Markdown** (`/read`), phòng khi bài bị xoá.
@@ -13,14 +13,14 @@ và gửi **mỗi giờ một bài** (một card) vào Google Chat, đồng th�
 cron (mỗi giờ, UTC)  ─┐
 nút "Chạy ngay"      ─┴─► khoá (D1) ─► 1. LƯU:   đọc ~85 feed ─► bài chưa có trong D1, mới → cũ, tối đa 1000 bài
                                                   ─► ghi vào D1 với sent = 0 (kèm tóm tắt + nội dung từ feed)
-                                       2. GỬI:   lấy 1 bài sent = 0 mới nhất ─► Google Chat (card, ảnh og:image) ─► sent = 1
+                                       2. GỬI:   chọn ngẫu nhiên 1 bài sent = 0 ─► Google Chat (card, ảnh og:image) ─► sent = 1
                                        3. CRAWL: tải trang đầy đủ của 100 bài chưa có nội dung đầy đủ ─► Markdown vào D1
 ```
 
 - Mỗi nguồn độc lập: một feed lỗi không ảnh hưởng nguồn khác. Lỗi đơn lẻ (429, timeout) rất hay gặp từ IP Cloudflare nên **chỉ báo vào Google Chat khi một nguồn lỗi 3 lượt liên tiếp** (rồi nhắc lại mỗi 24 lượt nếu vẫn lỗi); bộ đếm nằm ở bảng `source_state`.
-- **Lưu, gửi và crawl tách riêng:** D1 được lấp đầy nhanh (tới `MAX_INGEST_PER_RUN` = 1000 bài mỗi lượt, bài mới trước), Google Chat chỉ nhận `MAX_PER_RUN` = 1 bài mỗi giờ. Cột `articles.sent` phân biệt: 0 = đã lưu chưa gửi, 1 = đã gửi. Bài gửi lỗi vẫn `sent = 0` nên lượt sau gửi lại. Trang lịch sử/tìm kiếm tìm trên **tất cả** bài, có bộ lọc Tất cả / Đã gửi / Chưa gửi.
+- **Lưu, gửi và crawl tách riêng:** D1 được lấp đầy nhanh (tới `MAX_INGEST_PER_RUN` = 1000 bài mỗi lượt, bài mới trước), Google Chat nhận `MAX_PER_RUN` = 1 bài mỗi giờ, chọn ngẫu nhiên trong hàng chờ. Cột `articles.sent` phân biệt: 0 = đã lưu chưa gửi, 1 = đã gửi. Bài gửi lỗi vẫn `sent = 0` nên lượt sau gửi lại. Trang lịch sử/tìm kiếm tìm trên **tất cả** bài, có bộ lọc Tất cả / Đã gửi / Chưa gửi.
 - **Crawl nội dung:** feed thường chỉ có tóm tắt ngắn mà bài hay bị xoá, nên mỗi lượt bot tải trang đầy đủ của `CRAWL_PER_RUN` (100) bài đã lưu, mới nhất trước, lưu Markdown vào `body`. Cột `crawled`: 0 = còn chờ tải, 1 = xong (đã tải, feed đã đủ bài, paper, hoặc bỏ cuộc sau `MAX_CRAWL_TRIES` = 3 lần lỗi). Log mỗi lượt có `queue_send=` (bài chờ gửi) và `queue_crawl=` (bài chờ tải trang).
-- Bài nào cũng được lưu bất kể tuổi, nên backlog được gửi dần mỗi giờ một bài cho tới khi hết.
+- Bài nào cũng được lưu bất kể tuổi, nên backlog được gửi dần (mỗi giờ một bài, thứ tự ngẫu nhiên) cho tới khi hết.
 - HTTP 429/503 được retry theo `Retry-After`.
 
 ## Cấu trúc
@@ -70,7 +70,7 @@ Yêu cầu: Node 22+, tài khoản Cloudflare **gói Workers Paid** (bot cần n
 
 Chạy `npm run deploy` (cần đã `wrangler login`). Workflow GitHub Actions từng có (typecheck + deploy khi push `main`) đã bị revert; khôi phục bằng `git revert` commit revert đó.
 
-> **Lần chạy đầu:** D1 trống nên lượt đầu lưu tối đa 1000 bài mới nhất, các lượt sau lưu nốt phần còn lại (và đọc lùi các trang cũ của feed phân trang). Google Chat nhận mỗi giờ một bài, mới → cũ, nên backlog có thể mất hàng tháng mới gửi hết; muốn nhanh hơn thì tăng `MAX_PER_RUN`.
+> **Lần chạy đầu:** D1 trống nên lượt đầu lưu tối đa 1000 bài mới nhất, các lượt sau lưu nốt phần còn lại (và đọc lùi các trang cũ của feed phân trang). Google Chat nhận mỗi giờ một bài ngẫu nhiên nên backlog hàng chục nghìn bài mất rất lâu; muốn nhanh hơn thì tăng `MAX_PER_RUN`.
 
 ## Chạy cục bộ
 
@@ -93,7 +93,7 @@ npm run typecheck
 - **Thêm / tắt nguồn:** sửa `BLOGS` trong `src/config.ts`: `rss('Tên', 'https://…/feed', 'backend')`, tắt bằng tham số thứ 4 `false`.
   Kênh: `backend`, `ai`, `security`, `paper` (hiển thị biểu tượng ở `src/gchat.ts`).
 - **Paper:** `PAPER_VENUES` (hội nghị), `PAPER_COMPANIES` (mã tổ chức OpenAlex) và `PAPER_WINDOW_DAYS` (chỉ lấy paper trong N ngày gần đây) trong `src/config.ts`. Hiện khoảng 230 paper/năm từ VLDB, SIGMOD, ICDE, SIGCOMM, ASPLOS, EuroSys, SOSP, STOC, FOCS. NSDI, USENIX ATC, FAST, SoCC, CIDR, PODC, SODA đã khai báo sẵn nhưng OpenAlex chưa có dữ liệu mới cho chúng. Nội dung lưu của paper là abstract.
-- **Số bài gửi mỗi giờ:** `MAX_PER_RUN` (mặc định 1). Nhiều bài thì card cách nhau ~1,1 s vì webhook Google Chat giới hạn ~1 request/giây.
+- **Số bài gửi mỗi giờ:** `MAX_PER_RUN` (mặc định 1, chọn ngẫu nhiên). Nhiều bài thì card cách nhau ~1,1 s vì webhook Google Chat giới hạn ~1 request/giây.
 - **Lịch chạy:** `triggers.crons` trong `wrangler.jsonc` (UTC), hiện `0 * * * *` = đầu mỗi giờ.
 
 ## Vận hành

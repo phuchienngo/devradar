@@ -8,6 +8,8 @@
   "preview_urls": false,
   // Chạy fetch handler (trang web) gần D1 ở APAC. Không ảnh hưởng cron.
   "placement": { "region": "aws:ap-southeast-1" },
+  // Địa chỉ trang điều khiển (sau Cloudflare Access), dùng cho nút "Bản lưu" trong card Google Chat.
+  "vars": { "SITE_URL": "https://feed.phuchien.me" },
   "triggers": {
     "crons": ["0 * * * *"]
   },

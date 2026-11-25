@@ -25,12 +25,14 @@ function retryAfterHeader(res: Response): number | null {
 /** fetch thử lại khi 429/503 (ưu tiên Retry-After, không có thì backoff + jitter). Luôn trả response cuối cùng, kể cả khi vẫn lỗi. */
 export async function fetchRetry(url: string, init: RequestInit = {}, opts: RetryOpts = {}): Promise<Response> {
   const { retries = 3, maxWaitMs = 20_000, timeoutMs = 15_000, statuses = [429, 503] } = opts;
+  const idempotent = !init.method || ['GET', 'HEAD'].includes(init.method.toUpperCase());
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
       res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
-      if (attempt >= Math.min(retries, 1)) throw e;
+      // Timeout/lỗi mạng chỉ thử lại với GET: POST có thể đã được server xử lý (thử lại sẽ gửi trùng, vd. card Google Chat)
+      if (!idempotent || attempt >= Math.min(retries, 1)) throw e;
       await sleep(1000 + Math.random() * 500);
       continue;
     }
