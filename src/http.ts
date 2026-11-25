@@ -7,7 +7,7 @@ export interface RetryOpts {
   timeoutMs?: number;
   /** Mã trạng thái được thử lại. */
   statuses?: number[];
-  /** Tự đọc thời gian chờ (ms) từ response, ví dụ body JSON của Telegram. null = dùng header/backoff. */
+  /** Tự đọc thời gian chờ (ms) từ response, ví dụ trường retry_after trong body JSON. null = dùng header/backoff. */
   delayFrom?: (res: Response) => Promise<number | null>;
 }
 

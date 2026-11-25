@@ -101,6 +101,4 @@ export const SOURCES: Source[] = ENABLED_BLOGS;
 export const MAX_PER_RUN = 30;
 /** Bỏ bài cũ hơn N ngày (nếu parse được ngày). */
 export const MAX_AGE_DAYS = 3;
-/** Số hash giữ trong key `seen` (FIFO). */
-export const SEEN_LIMIT = 3000;
 export const FETCH_TIMEOUT_MS = 15000;

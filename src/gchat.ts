@@ -37,14 +37,26 @@ async function post(url: string, body: unknown): Promise<void> {
 }
 
 /**
- * Mỗi bài một tin, cách nhau ~1,1 giây (~1 request/giây/space). No-op nếu chưa cấu hình URL.
- * Dừng ở lỗi đầu tiên và ném lỗi; không ảnh hưởng Telegram.
+ * Mỗi bài một tin, cách nhau ~1,1 giây (~1 request/giây/space).
+ * Dừng ở lỗi đầu tiên; trả về các bài đã gửi được để caller chỉ đánh dấu những bài đó.
  */
-export async function sendToGoogleChat(env: Env, items: Item[]): Promise<void> {
-  if (!env.GOOGLE_CHAT_WEBHOOK_URL || !items.length) return;
-  const images = await fetchOgImages(items.map((it) => it.url)); // preview kiểu Telegram
+export async function sendToGoogleChat(env: Env, items: Item[]): Promise<{ sent: Item[]; error?: string }> {
+  const sent: Item[] = [];
+  if (!items.length) return { sent };
+  const images = await fetchOgImages(items.map((it) => it.url)); // ảnh preview cho card
   for (const [i, it] of items.entries()) {
     if (i > 0) await new Promise((r) => setTimeout(r, 1100));
-    await post(env.GOOGLE_CHAT_WEBHOOK_URL, { cardsV2: [card(it, i, images[i] ?? null)] });
+    try {
+      await post(env.GOOGLE_CHAT_WEBHOOK_URL, { cardsV2: [card(it, i, images[i] ?? null)] });
+      sent.push(it);
+    } catch (e) {
+      return { sent, error: (e as Error).message };
+    }
   }
+  return { sent };
+}
+
+/** Tin văn bản thường, dùng cho cảnh báo lỗi. */
+export async function sendTextToGoogleChat(env: Env, text: string): Promise<void> {
+  await post(env.GOOGLE_CHAT_WEBHOOK_URL, { text: `⚠️ devradar\n${text}`.slice(0, 3900) });
 }

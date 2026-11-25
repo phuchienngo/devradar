@@ -6,16 +6,16 @@
   // workers.dev bật để gọi POST /run. Bảo vệ bằng Cloudflare Access (đăng nhập), không có auth trong code; preview URLs vẫn tắt
   "workers_dev": true,
   "preview_urls": false,
+  // Chạy fetch handler (trang web) gần D1 ở APAC. Không ảnh hưởng cron.
+  "placement": { "region": "aws:ap-southeast-1" },
   "triggers": {
     "crons": ["0 * * * *"]
   },
-  "vars": {
-    "TELEGRAM_CHAT_ID": "7369396966"
-  },
-  "kv_namespaces": [
+  "d1_databases": [
     {
-      "binding": "KV",
-      "id": "0cade1f069934a0ea262fb9f9974d98a"
+      "binding": "DB",
+      "database_name": "devradar-history",
+      "database_id": "c3e09a62-fbf1-453e-8d29-db6d0577737e"
     }
   ]
 }

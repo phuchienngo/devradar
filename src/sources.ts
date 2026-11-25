@@ -51,7 +51,7 @@ export function parseFeed(xml: string, src: Source): Item[] {
       source: src.name,
       channel: src.channel,
       publishedAt: Number.isNaN(ts) ? null : ts,
-      snippet: stripTags(body).slice(0, 300),
+      snippet: stripTags(body).slice(0, 500),
     });
   }
   return items;

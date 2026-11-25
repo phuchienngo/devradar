@@ -1,9 +1,6 @@
 export interface Env {
-  KV: KVNamespace;
-  TELEGRAM_BOT_TOKEN: string; // wrangler secret put TELEGRAM_BOT_TOKEN
-  TELEGRAM_CHAT_ID: string;
-  TELEGRAM_ERROR_CHAT_ID?: string; // tuỳ chọn, mặc định dùng TELEGRAM_CHAT_ID
-  GOOGLE_CHAT_WEBHOOK_URL?: string; // tuỳ chọn; wrangler secret put GOOGLE_CHAT_WEBHOOK_URL
+  GOOGLE_CHAT_WEBHOOK_URL: string; // wrangler secret put GOOGLE_CHAT_WEBHOOK_URL
+  DB: D1Database; // lịch sử các bài đã gửi + dedupe + khoá chạy
 }
 
 export interface Item {
