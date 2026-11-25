@@ -1,6 +1,9 @@
 import type { Env, Item } from './types';
 
 export interface HistoryRow {
+  id: string;
+  /** Đã lưu nội dung bài (xem được ở /read). */
+  archived: number;
   url: string;
   title: string;
   source: string;
@@ -12,12 +15,14 @@ export interface HistoryRow {
   excerpt?: string;
 }
 
-const SCHEMA = [
+const BASE = [
   `CREATE TABLE IF NOT EXISTS articles (
     id TEXT PRIMARY KEY,           -- hash URL
     url TEXT NOT NULL,
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '', -- đoạn tóm tắt lấy từ feed
+    body TEXT NOT NULL DEFAULT '',    -- nội dung bài (văn bản thô), '' nếu chưa lưu được
+    body_tries INTEGER NOT NULL DEFAULT 0, -- số lần thử lưu nội dung
     source TEXT NOT NULL,
     channel TEXT NOT NULL,
     published_at INTEGER,          -- epoch ms, có thể NULL
@@ -25,27 +30,53 @@ const SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS idx_articles_sent_at ON articles (sent_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source, sent_at DESC)',
-  // Full-text search (FTS5) trên tiêu đề + tóm tắt + nguồn; bỏ dấu để "toi uu" khớp "Tối ưu".
-  // content='articles': FTS chỉ giữ chỉ mục, văn bản vẫn nằm ở bảng articles.
-  `CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
-    title, summary, source,
-    content='articles', content_rowid='rowid',
-    tokenize='unicode61 remove_diacritics 2'
-  )`,
-  `CREATE TRIGGER IF NOT EXISTS articles_ai AFTER INSERT ON articles BEGIN
-    INSERT INTO articles_fts(rowid, title, summary, source) VALUES (new.rowid, new.title, new.summary, new.source);
-  END`,
-  `CREATE TRIGGER IF NOT EXISTS articles_ad AFTER DELETE ON articles BEGIN
-    INSERT INTO articles_fts(articles_fts, rowid, title, summary, source) VALUES ('delete', old.rowid, old.title, old.summary, old.source);
-  END`,
   // Khoá chống chạy chồng giữa cron và nút bấm; tự hết hạn phòng khi lượt chạy chết giữa chừng.
   'CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)',
 ];
 
-// Tự tạo bảng nếu chưa có (không cần chạy migration). Mỗi isolate chỉ chạy một lần; lỗi thì lần sau thử lại.
+// Full-text search (FTS5) trên tiêu đề + tóm tắt + nội dung + nguồn; bỏ dấu để "toi uu" khớp "Tối ưu".
+// content='articles': FTS chỉ giữ chỉ mục, văn bản vẫn nằm ở bảng articles.
+const FTS = [
+  `CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+    title, summary, body, source,
+    content='articles', content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 2'
+  )`,
+  `CREATE TRIGGER IF NOT EXISTS articles_ai AFTER INSERT ON articles BEGIN
+    INSERT INTO articles_fts(rowid, title, summary, body, source) VALUES (new.rowid, new.title, new.summary, new.body, new.source);
+  END`,
+  `CREATE TRIGGER IF NOT EXISTS articles_ad AFTER DELETE ON articles BEGIN
+    INSERT INTO articles_fts(articles_fts, rowid, title, summary, body, source) VALUES ('delete', old.rowid, old.title, old.summary, old.body, old.source);
+  END`,
+  // Chỉ chạy khi đổi nội dung chữ (không chạy khi chỉ tăng body_tries)
+  `CREATE TRIGGER IF NOT EXISTS articles_au AFTER UPDATE OF title, summary, body, source ON articles BEGIN
+    INSERT INTO articles_fts(articles_fts, rowid, title, summary, body, source) VALUES ('delete', old.rowid, old.title, old.summary, old.body, old.source);
+    INSERT INTO articles_fts(rowid, title, summary, body, source) VALUES (new.rowid, new.title, new.summary, new.body, new.source);
+  END`,
+];
+
+/** Nâng cấp bảng cũ (chưa có cột body): thêm cột, bỏ FTS + trigger cũ để dựng lại. */
+async function migrate(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare("SELECT name FROM pragma_table_info('articles')").all<{ name: string }>();
+  const cols = new Set(results.map((r) => r.name));
+  const stmts: string[] = [];
+  if (!cols.has('body')) stmts.push("ALTER TABLE articles ADD COLUMN body TEXT NOT NULL DEFAULT ''");
+  if (!cols.has('body_tries')) stmts.push('ALTER TABLE articles ADD COLUMN body_tries INTEGER NOT NULL DEFAULT 0');
+  if (!stmts.length) return;
+  stmts.push('DROP TRIGGER IF EXISTS articles_ai', 'DROP TRIGGER IF EXISTS articles_ad', 'DROP TRIGGER IF EXISTS articles_au', 'DROP TABLE IF EXISTS articles_fts');
+  await env.DB.batch(stmts.map((q) => env.DB.prepare(q)));
+}
+
+// Tự tạo / nâng cấp bảng (không cần chạy migration). Mỗi isolate chỉ chạy một lần; lỗi thì lần sau thử lại.
 let ready: Promise<unknown> | null = null;
 function ensureSchema(env: Env): Promise<unknown> {
-  ready ??= env.DB.batch(SCHEMA.map((q) => env.DB.prepare(q))).catch((e) => {
+  ready ??= (async () => {
+    await env.DB.batch(BASE.map((q) => env.DB.prepare(q)));
+    await migrate(env);
+    const had = await env.DB.prepare("SELECT 1 AS x FROM sqlite_master WHERE name = 'articles_fts'").first();
+    await env.DB.batch(FTS.map((q) => env.DB.prepare(q)));
+    if (!had) await env.DB.prepare("INSERT INTO articles_fts(articles_fts) VALUES ('rebuild')").run(); // dựng chỉ mục từ dữ liệu có sẵn
+  })().catch((e) => {
     ready = null;
     throw e;
   });
@@ -79,16 +110,55 @@ export async function releaseLock(env: Env): Promise<void> {
 }
 
 /** Ghi các bài vừa gửi vào D1. INSERT OR IGNORE: chạy lại không tạo dòng trùng. Chạy 1 batch = 1 round-trip. */
-export async function logToHistory(env: Env, entries: { hash: string; item: Item }[]): Promise<void> {
+export async function logToHistory(env: Env, entries: { hash: string; item: Item; body: string }[]): Promise<void> {
   if (!entries.length) return;
   await ensureSchema(env);
   const now = Date.now();
   const stmt = env.DB.prepare(
-    'INSERT OR IGNORE INTO articles (id, url, title, summary, source, channel, published_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO articles (id, url, title, summary, body, body_tries, source, channel, published_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   await env.DB.batch(
-    entries.map(({ hash, item: it }) => stmt.bind(hash, it.url, it.title, it.snippet, it.source, it.channel, it.publishedAt, now)),
+    entries.map(({ hash, item: it, body }) =>
+      stmt.bind(hash, it.url, it.title, it.snippet, body, body ? 0 : 1, it.source, it.channel, it.publishedAt, now),
+    ),
   );
+}
+
+const BACKFILL_WINDOW_MS = 3 * 86_400_000;
+const MAX_BODY_TRIES = 3;
+
+/** Bài gần đây chưa lưu được nội dung và còn lượt thử. */
+export async function backfillCandidates(env: Env, limit: number): Promise<{ id: string; url: string }[]> {
+  await ensureSchema(env);
+  const { results } = await env.DB.prepare(
+    "SELECT id, url FROM articles WHERE body = '' AND body_tries < ?1 AND sent_at > ?2 ORDER BY sent_at DESC LIMIT ?3",
+  )
+    .bind(MAX_BODY_TRIES, Date.now() - BACKFILL_WINDOW_MS, limit)
+    .all<{ id: string; url: string }>();
+  return results;
+}
+
+/** Ghi kết quả một lần thử: có nội dung thì lưu, không thì chỉ tăng số lần thử. */
+export async function saveBody(env: Env, id: string, body: string): Promise<void> {
+  await env.DB.prepare('UPDATE articles SET body = ?1, body_tries = body_tries + 1 WHERE id = ?2').bind(body, id).run();
+}
+
+export interface Archived {
+  title: string;
+  url: string;
+  source: string;
+  publishedAt: number | null;
+  sentAt: number;
+  body: string;
+}
+
+export async function getArticle(env: Env, id: string): Promise<Archived | null> {
+  await ensureSchema(env);
+  return env.DB.prepare(
+    'SELECT title, url, source, published_at AS publishedAt, sent_at AS sentAt, body FROM articles WHERE id = ?',
+  )
+    .bind(id)
+    .first<Archived>();
 }
 
 export interface HistoryQuery {
@@ -127,11 +197,13 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
     const src = source ? 'AND a.source = ?' : '';
     const srcArgs = source ? [source] : [];
     rowsStmt = env.DB.prepare(
-      `SELECT a.url, a.title, a.summary, a.source, a.channel, a.published_at AS publishedAt, a.sent_at AS sentAt,
-              snippet(articles_fts, 1, '${HL_OPEN}', '${HL_CLOSE}', '…', 24) AS excerpt
+      `SELECT a.id, a.url, a.title, a.summary, a.source, a.channel, a.published_at AS publishedAt, a.sent_at AS sentAt,
+              a.body <> '' AS archived,
+              CASE WHEN a.body <> '' THEN snippet(articles_fts, 2, '${HL_OPEN}', '${HL_CLOSE}', '…', 24)
+                   ELSE snippet(articles_fts, 1, '${HL_OPEN}', '${HL_CLOSE}', '…', 24) END AS excerpt
        FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
        WHERE articles_fts MATCH ? ${src}
-       ORDER BY bm25(articles_fts, 10.0, 1.0, 2.0), a.sent_at DESC LIMIT ? OFFSET ?`,
+       ORDER BY bm25(articles_fts, 10.0, 2.0, 1.0, 3.0), a.sent_at DESC LIMIT ? OFFSET ?`,
     ).bind(fts, ...srcArgs, PAGE_SIZE, offset);
     countStmt = env.DB.prepare(
       `SELECT COUNT(*) AS n FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
@@ -150,7 +222,7 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
     }
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
     rowsStmt = env.DB.prepare(
-      `SELECT url, title, summary, source, channel, published_at AS publishedAt, sent_at AS sentAt
+      `SELECT id, url, title, summary, source, channel, published_at AS publishedAt, sent_at AS sentAt, body <> '' AS archived
        FROM articles ${w} ORDER BY sent_at DESC, id LIMIT ? OFFSET ?`,
     ).bind(...args, PAGE_SIZE, offset);
     countStmt = env.DB.prepare(`SELECT COUNT(*) AS n FROM articles ${w}`).bind(...args);

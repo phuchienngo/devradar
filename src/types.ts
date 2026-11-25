@@ -10,4 +10,6 @@ export interface Item {
   channel: string;
   publishedAt: number | null; // epoch ms
   snippet: string;
+  /** Văn bản đầy đủ nếu feed có kèm; rỗng nếu chỉ có tóm tắt. */
+  content: string;
 }

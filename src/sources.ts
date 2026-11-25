@@ -1,20 +1,7 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
 import { fetchRetry } from './http';
+import { decode, htmlToText, stripTags } from './text';
 import type { Item } from './types';
-
-const ENTITIES: Record<string, string> = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-};
-
-function decode(s: string): string {
-  return s
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m);
-}
-
-const stripTags = (s: string) => decode(s).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
 function tag(block: string, name: string): string | null {
   const m = block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i'));
@@ -45,6 +32,10 @@ export function parseFeed(xml: string, src: Source): Item[] {
     const date = tag(b, 'pubDate') ?? tag(b, 'published') ?? tag(b, 'updated') ?? tag(b, 'dc:date');
     const ts = date ? Date.parse(stripTags(date)) : NaN;
     const body = tag(b, 'description') ?? tag(b, 'summary') ?? tag(b, 'content') ?? tag(b, 'content:encoded') ?? '';
+    // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
+    const full = [tag(b, 'content:encoded'), tag(b, 'content'), tag(b, 'description'), tag(b, 'summary')]
+      .map((x) => (x ? htmlToText(x) : ''))
+      .reduce((a, c) => (c.length > a.length ? c : a), '');
     items.push({
       url,
       title: stripTags(title),
@@ -52,6 +43,7 @@ export function parseFeed(xml: string, src: Source): Item[] {
       channel: src.channel,
       publishedAt: Number.isNaN(ts) ? null : ts,
       snippet: stripTags(body).slice(0, 500),
+      content: full,
     });
   }
   return items;

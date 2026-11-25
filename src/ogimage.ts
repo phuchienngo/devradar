@@ -1,3 +1,4 @@
+import { perHost } from './hosts';
 import { fetchRetry } from './http';
 
 const MAX_BYTES = 120_000;
@@ -52,34 +53,5 @@ function resolve(src: string, base: string): string | null {
   }
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const hostOf = (u: string) => {
-  try {
-    return new URL(u).hostname;
-  } catch {
-    return u;
-  }
-};
-
-/**
- * Lấy ảnh cho nhiều bài. Bài cùng một host được tải tuần tự (cách nhau 400ms) để tránh bị 429;
- * các host khác nhau chạy song song, tối đa `limit` host cùng lúc.
- */
-export async function fetchOgImages(urls: string[], limit = 6): Promise<(string | null)[]> {
-  const out: (string | null)[] = new Array(urls.length).fill(null);
-  const groups = new Map<string, number[]>();
-  urls.forEach((u, i) => groups.set(hostOf(u), [...(groups.get(hostOf(u)) ?? []), i]));
-
-  const queue = [...groups.values()];
-  await Promise.all(
-    Array.from({ length: Math.min(limit, queue.length) }, async () => {
-      for (let g = queue.shift(); g; g = queue.shift()) {
-        for (const [k, i] of g.entries()) {
-          if (k > 0) await sleep(400);
-          out[i] = await fetchOgImage(urls[i]!);
-        }
-      }
-    }),
-  );
-  return out;
-}
+/** Lấy ảnh cho nhiều bài; bài cùng host được tải tuần tự, cách nhau 400ms. */
+export const fetchOgImages = (urls: string[], limit = 6): Promise<(string | null)[]> => perHost(urls, fetchOgImage, null, 400, limit);

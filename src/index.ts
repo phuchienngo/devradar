@@ -1,10 +1,11 @@
 import { MAX_AGE_DAYS, MAX_PER_RUN, SOURCES } from './config';
+import { archiveBodies, backfillBodies } from './archive';
 import { hashUrl } from './dedupe';
 import { sendTextToGoogleChat, sendToGoogleChat } from './gchat';
-import { acquireLock, loadSeen, logToHistory, queryHistory, releaseLock } from './history';
+import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, releaseLock } from './history';
 import { fetchSource } from './sources';
 import type { Env, Item } from './types';
-import { PAGE } from './ui';
+import { PAGE, renderArticle } from './ui';
 
 export interface RunResult {
   summary: string;
@@ -80,18 +81,34 @@ export async function run(env: Env, dry = false): Promise<RunResult> {
     errors.push(`Google Chat: ${msg(e)}`);
   }
 
-  // 5. Ghi D1: vừa là lịch sử vừa đánh dấu đã gửi. Lỗi ở đây nghĩa là các bài đó có thể bị gửi lại.
+  // 5. Lưu nội dung bài (feed nếu đủ dài, không thì tải trang). Lỗi ở đây không ảnh hưởng gì khác.
+  let bodies: string[] = [];
   try {
-    await logToHistory(env, sent.map((item) => ({ hash: hashOf.get(item)!, item })));
+    bodies = await archiveBodies(sent);
+  } catch (e) {
+    console.warn(`archive: ${msg(e)}`);
+  }
+
+  // 6. Ghi D1: vừa là lịch sử vừa đánh dấu đã gửi. Lỗi ở đây nghĩa là các bài đó có thể bị gửi lại.
+  try {
+    await logToHistory(env, sent.map((item, i) => ({ hash: hashOf.get(item)!, item, body: bodies[i] ?? '' })));
   } catch (e) {
     errors.push(`D1: ghi lịch sử lỗi, các bài vừa gửi có thể bị gửi lại (${msg(e)})`);
+  }
+
+  // 7. Thử lại các bài gần đây chưa lưu được nội dung
+  let backfilled = 0;
+  try {
+    backfilled = await backfillBodies(env);
+  } catch (e) {
+    console.warn(`backfill: ${msg(e)}`);
   }
 
   if (errors.length) {
     console.warn(errors.join(' ; '));
     await notify(env, errors.join('\n'));
   }
-  return { summary: `${base} sent=${sent.length} errors=${errors.length}`, errors };
+  return { summary: `${base} sent=${sent.length} archived=${bodies.filter(Boolean).length} backfilled=${backfilled} errors=${errors.length}`, errors };
 }
 
 /** Khoá (bảng `locks` trong D1) để cron và trigger thủ công không chạy chồng nhau, tránh gửi trùng. Hết hạn sau 10 phút. */
@@ -146,6 +163,12 @@ export default {
       } catch (e) {
         return Response.json({ error: msg(e) }, { status: 500 });
       }
+    }
+    if (url.pathname === '/read' && req.method === 'GET') {
+      const id = url.searchParams.get('id') ?? '';
+      const a = /^[0-9a-f]{16}$/.test(id) ? await getArticle(env, id).catch(() => null) : null;
+      if (!a || !a.body) return new Response('Không có bản lưu cho bài này', { status: 404 });
+      return new Response(renderArticle(a), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
     }
     if (url.pathname !== '/run') return new Response('Not found', { status: 404 });
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });

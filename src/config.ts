@@ -117,10 +117,10 @@ export const BLOGS: Source[] = [
   rss('Trail of Bits', 'https://blog.trailofbits.com/feed/', 'security'),
   rss('PortSwigger Research', 'https://portswigger.net/research/rss', 'security'),
   rss('Krebs on Security', 'https://krebsonsecurity.com/feed/', 'security'),
+  rss('Kaspersky Securelist', 'https://securelist.com/feed/', 'security'),
 
   // ---- AI ----
   rss('OpenAI Engineering', 'https://openai.com/news/engineering/rss.xml', 'ai'),
-  rss('Hugging Face', 'https://huggingface.co/blog/feed.xml', 'ai'),
   rss('Google Research', 'https://research.google/blog/rss/', 'ai'),
   rss('DeepMind', 'https://deepmind.com/blog/feed/basic/', 'ai'),
   rss('Nvidia Developer', 'https://developer.nvidia.com/blog/feed', 'ai'),

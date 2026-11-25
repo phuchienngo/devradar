@@ -133,6 +133,11 @@ function card(r, hl) {
   const when = document.createElement('span'); when.textContent = r.publishedAt ? 'đăng ' + ago(r.publishedAt) : 'gửi ' + ago(r.sentAt);
   when.title = 'Gửi lúc ' + new Date(r.sentAt).toLocaleString('vi-VN');
   m.append(chip, when);
+  if (r.archived) {
+    const rd = document.createElement('a'); rd.href = '/read?id=' + encodeURIComponent(r.id); rd.target = '_blank'; rd.rel = 'noopener';
+    rd.className = 'small text-decoration-none'; rd.textContent = '📄 Bản lưu';
+    m.append(rd);
+  }
   body.append(a, m);
   const text = r.excerpt || (r.summary || '').slice(0, 220);
   if (text) body.append(excerpt(text, hl));
@@ -186,3 +191,46 @@ loadHist();
 </script>
 </body>
 </html>`;
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Trang đọc bản lưu của một bài. Mọi chuỗi đều được escape; chỉ nhận link http(s). */
+export function renderArticle(a: { title: string; url: string; source: string; publishedAt: number | null; sentAt: number; body: string }): string {
+  const safeUrl = /^https?:\/\//i.test(a.url) ? a.url : '#';
+  const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const paras = a.body
+    .split(/\n{2,}/)
+    .map((p) => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>')
+    .join('\n');
+  return `<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${esc(a.title)} · devradar</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.9/dist/css/bootstrap.min.css"
+  integrity="sha384-yEPZ7jP9S0QKiUQ0m3jjsO4ProIW7wvR9gXkI7JOGa2XVsw53Yke2bsdkBbjmmiX" crossorigin="anonymous">
+<script>
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  const setTheme = () => document.documentElement.setAttribute('data-bs-theme', mq.matches ? 'dark' : 'light');
+  setTheme(); mq.addEventListener('change', setTheme);
+</script>
+<style> article { line-height:1.75; font-size:1.05rem; overflow-wrap:anywhere; } article p { margin:0 0 1rem; } </style>
+</head>
+<body class="bg-body-tertiary">
+<main class="container py-4" style="max-width:760px">
+  <a href="/" class="text-decoration-none small">← Quay lại</a>
+  <h1 class="h3 mt-2">${esc(a.title)}</h1>
+  <div class="text-body-secondary small mb-3">
+    ${esc(a.source)}${a.publishedAt ? ' · đăng ' + fmt(a.publishedAt) : ''} · lưu ${fmt(a.sentAt)} ·
+    <a href="${esc(safeUrl)}" target="_blank" rel="noopener">bản gốc ↗</a>
+  </div>
+  <div class="alert alert-secondary small">Bản lưu văn bản thô để tra cứu cá nhân; ảnh, định dạng và code block có thể bị mất.</div>
+  <article class="card card-body shadow-sm">
+${paras}
+  </article>
+</main>
+</body>
+</html>`;
+}
