@@ -74,7 +74,8 @@ export async function archiveBodies(items: Item[]): Promise<string[]> {
     items.map((i) => i.url),
     async (_url, i) => {
       const item = items[i]!;
-      if (item.content.length >= FEED_FULL_MIN) return item.content.slice(0, BODY_MAX_CHARS);
+      // Paper: nội dung là abstract có sẵn; trang DOI thường là publisher chặn/paywall nên không tải
+      if (item.channel === 'paper' || item.content.length >= FEED_FULL_MIN) return item.content.slice(0, BODY_MAX_CHARS);
       const page = await fetchArticleText(item.url);
       return (page.length > item.content.length ? page : item.content).slice(0, BODY_MAX_CHARS);
     },

@@ -2,7 +2,7 @@ import { fetchRetry } from './http';
 import { fetchOgImages } from './ogimage';
 import type { Env, Item } from './types';
 
-const ICON: Record<string, string> = { backend: '⚙️', ai: '🤖', security: '🔒' };
+const ICON: Record<string, string> = { backend: '⚙️', ai: '🤖', security: '🔒', paper: '📄' };
 
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

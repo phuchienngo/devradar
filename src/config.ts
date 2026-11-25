@@ -1,8 +1,8 @@
-export type Channel = 'backend' | 'ai' | 'security';
+export type Channel = 'backend' | 'ai' | 'security' | 'paper';
 
 export interface Source {
   name: string;
-  type: 'rss' | 'atom';
+  type: 'rss' | 'atom' | 'papers';
   url: string;
   channel: Channel;
   /** Tắt một nguồn bằng enabled: false. */
@@ -133,7 +133,51 @@ export const BLOGS: Source[] = [
   rss('Amazon Science', 'https://www.amazon.science/index.rss', 'ai'),
 ];
 
-export const SOURCES: Source[] = BLOGS.filter((s) => s.enabled);
+/**
+ * Paper của các công ty lớn tại hội nghị hệ thống / CSDL / thuật toán (qua OpenAlex). Mã lấy từ OpenAlex: một hội nghị có thể
+ * có nhiều mã. Các hội nghị ghi "chưa có dữ liệu mới" thì OpenAlex hiện chưa cập nhật; để sẵn, có bài là tự lấy.
+ */
+export const PAPER_VENUES: Record<string, string[]> = {
+  VLDB: ['S4210226185'],
+  SIGMOD: ['S4393915683', 'S4387289859'], // hội nghị + PACMMOD
+  ICDE: ['S4210210321'],
+  SOSP: ['S7407089168'],
+  EuroSys: ['S4306418317'],
+  ASPLOS: ['S7407086669'],
+  SIGCOMM: ['S7407086014'],
+  STOC: ['S7407087723'],
+  FOCS: ['S4210175768'],
+  // chưa có dữ liệu mới trong OpenAlex (kiểm tra 11/2026):
+  NSDI: ['S4306420602'],
+  'USENIX ATC': ['S4306421113'],
+  FAST: ['S4306418422'],
+  SoCC: ['S7407088165', 'S4306420965'],
+  CIDR: ['S4306418070'],
+  PODC: ['S7407086807'],
+  SODA: ['S4306420974', 'S4363608728'],
+};
+/** Tổ chức tác giả (mã OpenAlex, gồm cả đơn vị con). Cloudflare không có trong OpenAlex. */
+export const PAPER_COMPANIES: Record<string, string> = {
+  Google: 'I1291425158',
+  'Google DeepMind': 'I4210090411',
+  Meta: 'I4210114444',
+  'Microsoft Research Asia': 'I4210113369',
+  'Microsoft Research UK': 'I4210164937',
+  Amazon: 'I1311688040',
+  Netflix: 'I869089601',
+  'Uber AI': 'I2946016260',
+  LinkedIn: 'I1316064682',
+  Alibaba: 'I45928872',
+  ByteDance: 'I4405256866',
+  Databricks: 'I4401726825',
+  Snowflake: 'I4400600931',
+};
+/** Chỉ lấy paper công bố trong N ngày gần đây (tránh xả cả lịch sử). */
+export const PAPER_WINDOW_DAYS = 365;
+
+const PAPERS: Source = { name: 'Paper (hội nghị lớn)', type: 'papers', url: 'https://api.openalex.org/works', channel: 'paper', enabled: true };
+
+export const SOURCES: Source[] = [...BLOGS, PAPERS].filter((s) => s.enabled);
 
 /** Tối đa số bài gửi mỗi lần chạy (mỗi bài một card, cách nhau ~1,1s). Phần dư để lần sau. */
 export const MAX_PER_RUN = 10;

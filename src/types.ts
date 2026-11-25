@@ -15,4 +15,8 @@ export interface Item {
 }
 
 /** Bài vừa đọc từ feed, chưa tạo tóm tắt/nội dung (việc đó tốn CPU nên chỉ làm cho bài sắp gửi). `block` là đoạn XML gốc. */
-export type Candidate = Omit<Item, 'snippet' | 'content'> & { block: string };
+export type Candidate = Omit<Item, 'snippet' | 'content'> & {
+  block: string;
+  /** Nguồn không phải feed (vd. paper từ API) đã có sẵn tóm tắt/nội dung, khỏi đọc từ `block`. */
+  hydrated?: Pick<Item, 'snippet' | 'content'>;
+};

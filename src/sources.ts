@@ -1,5 +1,6 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
 import { fetchRetry, USER_AGENT } from './http';
+import { fetchPapers } from './papers';
 import { decode, htmlToMarkdown, stripTags } from './text';
 import type { Candidate, Item } from './types';
 
@@ -48,7 +49,8 @@ function parseFeed(xml: string, src: Source): Candidate[] {
 }
 
 /** Tạo tóm tắt và nội dung đầy đủ (Markdown, nếu feed có kèm) cho một bài. Chỉ gọi cho bài sắp gửi. */
-export function hydrate({ block, ...rest }: Candidate): Item {
+export function hydrate({ block, hydrated, ...rest }: Candidate): Item {
+  if (hydrated) return { ...rest, ...hydrated };
   const body = tag(block, 'description') ?? tag(block, 'summary') ?? tag(block, 'content') ?? tag(block, 'content:encoded') ?? '';
   // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
   const content = [tag(block, 'content:encoded'), tag(block, 'content'), tag(block, 'description'), tag(block, 'summary')]
@@ -58,6 +60,7 @@ export function hydrate({ block, ...rest }: Candidate): Item {
 }
 
 export async function fetchSource(src: Source): Promise<Candidate[]> {
+  if (src.type === 'papers') return fetchPapers(src);
   const res = await fetchRetry(
     src.url,
     {

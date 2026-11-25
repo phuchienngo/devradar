@@ -28,7 +28,8 @@ nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed (đọc h�
 |---|---|
 | `src/index.ts` | `scheduled` (cron) + `fetch` (trang web, `/history`, `/read`, `/run`), khoá, điều phối |
 | `src/config.ts` | **Danh sách nguồn** và các hằng số (`MAX_PER_RUN`, `MAX_AGE_DAYS`) |
-| `src/sources.ts` | Parse RSS/Atom |
+| `src/sources.ts` | Parse RSS/Atom, tạo tóm tắt/nội dung cho bài sắp gửi |
+| `src/papers.ts` | Paper của các công ty lớn tại hội nghị hệ thống/CSDL/thuật toán, qua OpenAlex (JSON) |
 | `src/archive.ts` | Lưu nội dung bài (feed hoặc tải trang → Markdown), thử lại bài trượt |
 | `src/text.ts` | HTML → Markdown, giải mã entity |
 | `src/hosts.ts` | Chạy song song theo host, cùng host thì tuần tự (tránh 429) |
@@ -87,7 +88,8 @@ npm run typecheck
 ## Cấu hình
 
 - **Thêm / tắt nguồn:** sửa `BLOGS` trong `src/config.ts`: `rss('Tên', 'https://…/feed', 'backend')`, tắt bằng tham số thứ 4 `false`.
-  Kênh: `backend`, `ai`, `security` (hiển thị biểu tượng ở `src/gchat.ts`).
+  Kênh: `backend`, `ai`, `security`, `paper` (hiển thị biểu tượng ở `src/gchat.ts`).
+- **Paper:** `PAPER_VENUES` (hội nghị), `PAPER_COMPANIES` (mã tổ chức OpenAlex) và `PAPER_WINDOW_DAYS` (chỉ lấy paper trong N ngày gần đây) trong `src/config.ts`. Hiện khoảng 230 paper/năm từ VLDB, SIGMOD, ICDE, SIGCOMM, ASPLOS, EuroSys, SOSP, STOC, FOCS. NSDI, USENIX ATC, FAST, SoCC, CIDR, PODC, SODA đã khai báo sẵn nhưng OpenAlex chưa có dữ liệu mới cho chúng. Nội dung lưu của paper là abstract.
 - **Số bài mỗi lượt:** `MAX_PER_RUN` (mặc định 10). Card cách nhau ~1,1 s vì webhook Google Chat giới hạn ~1 request/giây.
 - **Tuổi tối đa của bài:** `MAX_AGE_DAYS` (hiện `Infinity` = không giới hạn; đặt số ngày để bỏ bài cũ).
 - **Lịch chạy:** `triggers.crons` trong `wrangler.jsonc` (UTC), hiện `0 * * * *` = đầu mỗi giờ.
