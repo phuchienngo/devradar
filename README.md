@@ -1,6 +1,6 @@
 # 📡 devradar
 
-Bot chạy trên Cloudflare Workers: mỗi giờ quét ~80 engineering blog / advisory bảo mật qua RSS/Atom, lọc bài mới
+Bot chạy trên Cloudflare Workers: mỗi 3 giờ quét ~80 engineering blog / advisory bảo mật qua RSS/Atom, lọc bài mới
 và gửi **mỗi bài một card** vào Google Chat. Không dùng LLM, không lọc theo từ khoá.
 
 - Dedupe, lịch sử và khoá chống chạy chồng đều nằm trong **Cloudflare D1**.
@@ -10,7 +10,7 @@ và gửi **mỗi bài một card** vào Google Chat. Không dùng LLM, không l
 ## Luồng chạy
 
 ```
-cron (mỗi giờ, UTC)  ─┐
+cron (mỗi 3 giờ, UTC) ─┐
 nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed ─► bỏ bài đã gửi (D1) / quá 3 ngày
                                          ─► cũ → mới, tối đa 30 bài ─► Google Chat (1 card/bài, có ảnh og:image)
                                          ─► lưu nội dung bài (Markdown, từ feed hoặc tải trang)
@@ -19,7 +19,7 @@ nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed ─► b�
 
 - Mỗi nguồn độc lập: một feed lỗi không ảnh hưởng nguồn khác. Lỗi được báo vào chính Google Chat.
 - Chỉ bài **gửi thành công** mới được ghi vào D1; bài lỗi sẽ thử lại ở lượt sau.
-- Bài vượt giới hạn 30 bài/lượt sẽ được gửi ở các giờ sau.
+- Bài vượt giới hạn 30 bài/lượt sẽ được gửi ở các lượt sau (mỗi 3 giờ).
 - HTTP 429/503 được retry theo `Retry-After`.
 
 ## Cấu trúc
@@ -66,7 +66,7 @@ Yêu cầu: Node 22+, tài khoản Cloudflare **gói Workers Paid** (bot cần n
 
 Chạy `npm run deploy` (cần đã `wrangler login`). Workflow GitHub Actions từng có (typecheck + deploy khi push `main`) đã bị revert; khôi phục bằng `git revert` commit revert đó.
 
-> **Lần chạy đầu:** D1 trống nên bot sẽ gửi ngay 30 bài mới nhất (≤ 3 ngày) vào chat, phần còn lại gửi dần ở các giờ sau.
+> **Lần chạy đầu:** D1 trống nên bot sẽ gửi ngay 30 bài mới nhất (≤ 3 ngày) vào chat, phần còn lại gửi dần ở các lượt sau (mỗi 3 giờ).
 
 ## Chạy cục bộ
 
@@ -90,7 +90,7 @@ npm run typecheck
   Kênh: `backend`, `ai`, `security` (hiển thị biểu tượng ở `src/gchat.ts`).
 - **Số bài mỗi lượt:** `MAX_PER_RUN` (mặc định 30). Card cách nhau ~1,1 s vì webhook Google Chat giới hạn ~1 request/giây.
 - **Tuổi tối đa của bài:** `MAX_AGE_DAYS` (mặc định 3).
-- **Lịch chạy:** `triggers.crons` trong `wrangler.jsonc` (UTC).
+- **Lịch chạy:** `triggers.crons` trong `wrangler.jsonc` (UTC), hiện `0 */3 * * *` = 00:00, 03:00, … 21:00 UTC (01:00, 04:00, 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 giờ VN).
 
 ## Vận hành
 
