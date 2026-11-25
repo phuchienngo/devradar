@@ -3,7 +3,6 @@ const ENTITIES: Record<string, string> = {
   lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', copy: '©', reg: '®', trade: '™', laquo: '«', raquo: '»',
 };
 
-/** Bỏ vỏ CDATA và giải mã entity (&amp; &#39; …). */
 export function decode(s: string): string {
   return s
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
@@ -34,11 +33,9 @@ const attr = (tag: string, name: string) => {
 const plain = (h: string) => decode(h.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
 
 /**
- * HTML → Markdown: tiêu đề, đoạn, danh sách, code block (```lang), `code`, **đậm**, *nghiêng*, [link](url),
- * ![ảnh](url), trích dẫn. Không phụ thuộc thư viện; bảng và danh sách lồng nhau được làm phẳng.
- * `base` dùng để đổi link/ảnh tương đối thành tuyệt đối.
- * Nội dung trong feed thường là HTML bị mã hoá entity (&lt;p&gt;), nên giải mã trước khi bóc thẻ khi cần.
- */
+  * HTML → Markdown (tiêu đề, đoạn, danh sách, code block, link/ảnh, trích dẫn) không cần thư viện; bảng và danh sách lồng nhau bị làm phẳng.
+  * `base` đổi link/ảnh tương đối thành tuyệt đối. Nội dung trong feed hay bị mã hoá entity nên giải mã trước khi bóc thẻ.
+  */
 export function htmlToMarkdown(html: string, base = 'https://example.invalid/'): string {
   let s = html.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
   if (!/<[a-z!/]/i.test(s)) s = decode(s);
@@ -53,7 +50,6 @@ export function htmlToMarkdown(html: string, base = 'https://example.invalid/'):
     return PH_OPEN + (blocks.length - 1) + PH_CLOSE;
   });
 
-  // 2) Inline
   s = s
     .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, c: string) => {
       const t = decode(c.replace(/<[^>]*>/g, ''));
@@ -71,7 +67,6 @@ export function htmlToMarkdown(html: string, base = 'https://example.invalid/'):
       return href && text ? `[${text.replace(/[\[\]]/g, '')}](${href})` : text;
     });
 
-  // 3) Cấu trúc khối
   s = s
     .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n: string, c: string) => {
       const t = c.replace(/<(?!img\b)[^>]*>/g, '').replace(/\s+/g, ' ').trim();

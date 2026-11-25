@@ -1,16 +1,13 @@
 import { perHost } from './hosts';
-import { backfillCandidates, saveBody } from './history';
+import { CRAWL_PER_RUN } from './config';
+import { pendingCrawl, saveCrawl } from './history';
 import { fetchRetry, USER_AGENT } from './http';
 import { htmlToMarkdown } from './text';
-import type { Env, Item } from './types';
+import type { Env } from './types';
 
-/** Feed đã kèm nội dung dài hơn mức này thì coi là đủ bài, khỏi tải trang. */
-const FEED_FULL_MIN = 1500;
-/** Giới hạn mỗi bài (ký tự) để không phình D1. */
 const BODY_MAX_CHARS = 100_000;
 const MAX_HTML_BYTES = 2_000_000;
 const MIN_PAGE_CHARS = 200; // ít hơn: trang render bằng JS hoặc bị chặn, coi như không lấy được
-const BACKFILL_PER_RUN = 10;
 
 const ENOUGH_CHARS = 1500;
 
@@ -39,7 +36,6 @@ function mainText(rawHtml: string, base: string): string {
   return best;
 }
 
-/** Tải trang và bóc văn bản; '' nếu lỗi / không phải HTML / gần như trống. */
 async function fetchArticleText(url: string): Promise<string> {
   try {
     const res = await fetchRetry(
@@ -68,26 +64,14 @@ async function fetchArticleText(url: string): Promise<string> {
   }
 }
 
-/** Nội dung lưu cho từng bài (cùng thứ tự đầu vào): ưu tiên feed nếu đủ dài, không thì tải trang. */
-export async function archiveBodies(items: Item[]): Promise<string[]> {
-  return perHost(
-    items.map((i) => i.url),
-    async (_url, i) => {
-      const item = items[i]!;
-      // Paper: nội dung là abstract có sẵn; trang DOI thường là publisher chặn/paywall nên không tải
-      if (item.channel === 'paper' || item.content.length >= FEED_FULL_MIN) return item.content.slice(0, BODY_MAX_CHARS);
-      const page = await fetchArticleText(item.url);
-      return (page.length > item.content.length ? page : item.content).slice(0, BODY_MAX_CHARS);
-    },
-    '',
+/** Tải nội dung đầy đủ của CRAWL_PER_RUN bài đã lưu (mới nhất trước) vì bài có thể bị xoá về sau. Trả về số bài tải được. */
+export async function crawlBodies(env: Env): Promise<number> {
+  const rows = await pendingCrawl(env, CRAWL_PER_RUN);
+  if (!rows.length) return 0;
+  const pages = await perHost(rows.map((r) => r.url), (u) => fetchArticleText(u), '');
+  await saveCrawl(
+    env,
+    rows.map((r, i) => ({ id: r.id, body: pages[i] ? (pages[i]!.length > r.body.length ? pages[i]! : r.body) : null })),
   );
-}
-
-/** Thử lại các bài gần đây chưa lưu được nội dung (tối đa 3 lần mỗi bài). Trả về số bài lưu thêm được. */
-export async function backfillBodies(env: Env): Promise<number> {
-  const pending = await backfillCandidates(env, BACKFILL_PER_RUN);
-  if (!pending.length) return 0;
-  const texts = await perHost(pending.map((p) => p.url), (u) => fetchArticleText(u), '');
-  await Promise.all(pending.map((p, i) => saveBody(env, p.id, texts[i] ?? '')));
-  return texts.filter(Boolean).length;
+  return pages.filter(Boolean).length;
 }

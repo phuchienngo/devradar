@@ -53,5 +53,4 @@ function resolve(src: string, base: string): string | null {
   }
 }
 
-/** Lấy ảnh cho nhiều bài; bài cùng host được tải tuần tự, cách nhau 400ms. */
 export const fetchOgImages = (urls: string[], limit = 6): Promise<(string | null)[]> => perHost(urls, fetchOgImage, null, 400, limit);

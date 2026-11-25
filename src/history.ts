@@ -1,8 +1,8 @@
+import { FULL_TEXT_MIN_CHARS, MAX_CRAWL_TRIES, SITE_OF } from './config';
 import type { Env, Item } from './types';
 
 export interface HistoryRow {
   id: string;
-  /** Đã lưu nội dung bài (xem được ở /read). */
   archived: number;
   url: string;
   title: string;
@@ -10,6 +10,8 @@ export interface HistoryRow {
   channel: string;
   publishedAt: number | null;
   sentAt: number;
+  /** 1 = đã gửi Google Chat, 0 = mới lưu, chưa gửi. */
+  sent: number;
   summary: string;
   /** Chỉ có khi tìm kiếm: đoạn trích, từ khớp nằm giữa \uE000 và \uE001. */
   excerpt?: string;
@@ -22,22 +24,29 @@ const BASE = [
     title TEXT NOT NULL,
     summary TEXT NOT NULL DEFAULT '', -- đoạn tóm tắt lấy từ feed
     body TEXT NOT NULL DEFAULT '',    -- nội dung bài dạng Markdown, '' nếu chưa lưu được
-    body_tries INTEGER NOT NULL DEFAULT 0, -- số lần thử lưu nội dung
+    body_tries INTEGER NOT NULL DEFAULT 0, -- số lần đã thử tải trang
+    crawled INTEGER NOT NULL DEFAULT 0,    -- 1 = không cần/không còn tải trang (đã tải, feed đã đủ bài, hoặc bỏ cuộc)
     source TEXT NOT NULL,
     channel TEXT NOT NULL,
     published_at INTEGER,          -- epoch ms, có thể NULL
-    sent_at INTEGER NOT NULL       -- epoch ms
+    sent_at INTEGER NOT NULL,      -- epoch ms: lúc gửi (sent = 1) hoặc lúc lưu vào D1 (sent = 0)
+    sent INTEGER NOT NULL DEFAULT 1 -- 0 = đã lưu nhưng chưa gửi Google Chat, 1 = đã gửi
   )`,
-  'CREATE INDEX IF NOT EXISTS idx_articles_sent_at ON articles (sent_at DESC)',
-  'CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source, sent_at DESC)',
   // Khoá chống chạy chồng giữa cron và nút bấm; tự hết hạn phòng khi lượt chạy chết giữa chừng.
   'CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)',
-  // Số lượt chạy liên tiếp mà mỗi nguồn bị lỗi, để chỉ báo khi lỗi dai dẳng (lỗi 429/timeout đơn lẻ rất thường gặp từ IP Cloudflare)
+  // Số lượt liên tiếp mỗi nguồn bị lỗi, để chỉ báo khi lỗi dai dẳng
   'CREATE TABLE IF NOT EXISTS source_state (name TEXT PRIMARY KEY, fails INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT \'\', updated_at INTEGER NOT NULL DEFAULT 0)',
 ];
 
 // Full-text search (FTS5) trên tiêu đề + tóm tắt + nội dung + nguồn; bỏ dấu để "toi uu" khớp "Tối ưu".
 // content='articles': FTS chỉ giữ chỉ mục, văn bản vẫn nằm ở bảng articles.
+const INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_articles_sent_at ON articles (sent_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source, sent_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_articles_pending ON articles (sent, published_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_articles_crawl ON articles (crawled, published_at DESC)',
+];
+
 const FTS = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
     title, summary, body, source,
@@ -62,9 +71,19 @@ let ready: Promise<unknown> | null = null;
 function ensureSchema(env: Env): Promise<unknown> {
   ready ??= (async () => {
     await env.DB.batch(BASE.map((q) => env.DB.prepare(q)));
-    const had = await env.DB.prepare("SELECT 1 AS x FROM sqlite_master WHERE name = 'articles_fts'").first();
+    // TẠM THỜI: DB đang chạy chưa có cột `crawled`. Xoá nhánh này sau khi bản có cột này đã deploy và chạy một lần.
+    const cols = await env.DB.prepare("SELECT name FROM pragma_table_info('articles')").all<{ name: string }>();
+    if (!cols.results.some((c) => c.name === 'crawled')) {
+      // Bài chỉ có nội dung ngắn từ feed (chưa tải trang, chưa bỏ cuộc) vào hàng đợi crawl; còn lại coi như xong
+      await env.DB.prepare('ALTER TABLE articles ADD COLUMN crawled INTEGER NOT NULL DEFAULT 1').run();
+      await env.DB.prepare(
+        `UPDATE articles SET crawled = 0 WHERE channel <> 'paper' AND length(body) < ?1 AND body_tries < ?2`,
+      )
+        .bind(FULL_TEXT_MIN_CHARS, MAX_CRAWL_TRIES)
+        .run();
+    }
+    await env.DB.batch(INDEXES.map((q) => env.DB.prepare(q)));
     await env.DB.batch(FTS.map((q) => env.DB.prepare(q)));
-    if (!had) await env.DB.prepare("INSERT INTO articles_fts(articles_fts) VALUES ('rebuild')").run(); // dựng chỉ mục từ dữ liệu có sẵn
   })().catch((e) => {
     ready = null;
     throw e;
@@ -72,7 +91,7 @@ function ensureSchema(env: Env): Promise<unknown> {
   return ready;
 }
 
-/** Các bài đã gửi (id = hash URL). Bảng này vừa là lịch sử vừa là dữ liệu dedupe. */
+/** Mọi bài đã lưu, gửi hay chưa (id = hash URL). Bảng này vừa là lịch sử vừa là dữ liệu dedupe. */
 export async function loadSeen(env: Env): Promise<Set<string>> {
   await ensureSchema(env);
   const { results } = await env.DB.prepare('SELECT id FROM articles').all<{ id: string }>();
@@ -81,7 +100,6 @@ export async function loadSeen(env: Env): Promise<Set<string>> {
 
 const LOCK_MS = 10 * 60_000;
 
-/** true nếu lấy được khoá (chưa có lượt nào đang chạy, hoặc khoá cũ đã hết hạn). */
 export async function acquireLock(env: Env): Promise<boolean> {
   await ensureSchema(env);
   const now = Date.now();
@@ -98,38 +116,85 @@ export async function releaseLock(env: Env): Promise<void> {
   await env.DB.prepare("DELETE FROM locks WHERE name = 'run'").run();
 }
 
-/** Ghi các bài vừa gửi vào D1. INSERT OR IGNORE: chạy lại không tạo dòng trùng. Chạy 1 batch = 1 round-trip. */
-export async function logToHistory(env: Env, entries: { hash: string; item: Item; body: string }[]): Promise<void> {
-  if (!entries.length) return;
+const INGEST_CHUNK = 50;
+
+/** Cần tải trang khi feed chỉ có tóm tắt ngắn. Paper chỉ có abstract (trang nhà xuất bản thường chặn). */
+const needsPage = (it: Item) => it.channel !== 'paper' && it.content.length < FULL_TEXT_MIN_CHARS;
+
+/** Lưu bài mới với sent = 0. INSERT OR IGNORE nên chạy lại không tạo dòng trùng; trả về số dòng thực sự thêm. */
+export async function ingestArticles(env: Env, entries: { hash: string; item: Item }[]): Promise<number> {
+  if (!entries.length) return 0;
   await ensureSchema(env);
   const now = Date.now();
   const stmt = env.DB.prepare(
-    'INSERT OR IGNORE INTO articles (id, url, title, summary, body, body_tries, source, channel, published_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO articles (id, url, title, summary, body, body_tries, source, channel, published_at, sent_at, sent, crawled) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, ?)',
   );
-  await env.DB.batch(
-    entries.map(({ hash, item: it, body }) =>
-      stmt.bind(hash, it.url, it.title, it.snippet, body, body ? 0 : 1, it.source, it.channel, it.publishedAt, now),
-    ),
-  );
+  let added = 0;
+  for (let i = 0; i < entries.length; i += INGEST_CHUNK) {
+    const res = await env.DB.batch(
+      entries.slice(i, i + INGEST_CHUNK).map(({ hash, item: it }) => stmt.bind(hash, it.url, it.title, it.snippet, it.content, it.source, it.channel, it.publishedAt, now, needsPage(it) ? 0 : 1)),
+    );
+    added += res.filter((r) => r.meta.changes > 0).length; // changes tính cả dòng trigger/FTS ghi thêm, nên đếm câu lệnh chứ không cộng changes
+  }
+  return added;
 }
 
-const BACKFILL_WINDOW_MS = 3 * 86_400_000;
-const MAX_BODY_TRIES = 3;
+interface Pending {
+  id: string;
+  item: Item;
+}
 
-/** Bài gần đây chưa lưu được nội dung và còn lượt thử (tối đa 3 lần). */
-export async function backfillCandidates(env: Env, limit: number): Promise<{ id: string; url: string }[]> {
+/** `limit` bài chưa gửi mới nhất (ngày xuất bản không vượt quá lúc lưu, tránh bài ghi ngày tương lai chen lên đầu). */
+export async function pendingToSend(env: Env, limit: number): Promise<Pending[]> {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
-    "SELECT id, url FROM articles WHERE body = '' AND body_tries < ?1 AND sent_at > ?2 ORDER BY sent_at DESC LIMIT ?3",
+    `SELECT id, url, title, summary, body, source, channel, published_at AS publishedAt
+     FROM articles WHERE sent = 0
+     ORDER BY MIN(COALESCE(published_at, sent_at), sent_at) DESC, id LIMIT ?`,
   )
-    .bind(MAX_BODY_TRIES, Date.now() - BACKFILL_WINDOW_MS, limit)
-    .all<{ id: string; url: string }>();
+    .bind(limit)
+    .all<{ id: string; url: string; title: string; summary: string; body: string; source: string; channel: string; publishedAt: number | null }>();
+  return results.map((r) => ({
+    id: r.id,
+    item: { url: r.url, title: r.title, source: r.source, channel: r.channel, publishedAt: r.publishedAt, snippet: r.summary, content: r.body },
+  }));
+}
+
+export async function countPending(env: Env): Promise<number> {
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM articles WHERE sent = 0').first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+export async function markSent(env: Env, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const now = Date.now();
+  const stmt = env.DB.prepare('UPDATE articles SET sent = 1, sent_at = ?1 WHERE id = ?2');
+  await env.DB.batch(ids.map((id) => stmt.bind(now, id)));
+}
+
+/** Bài cần tải trang, mới nhất trước (cùng thứ tự với hàng đợi gửi). */
+export async function pendingCrawl(env: Env, limit: number): Promise<{ id: string; url: string; body: string }[]> {
+  await ensureSchema(env);
+  const { results } = await env.DB.prepare(
+    `SELECT id, url, body FROM articles WHERE crawled = 0
+     ORDER BY MIN(COALESCE(published_at, sent_at), sent_at) DESC, id LIMIT ?`,
+  )
+    .bind(limit)
+    .all<{ id: string; url: string; body: string }>();
   return results;
 }
 
-/** Ghi kết quả một lần thử: có nội dung thì lưu, không thì chỉ tăng số lần thử. */
-export async function saveBody(env: Env, id: string, body: string): Promise<void> {
-  await env.DB.prepare('UPDATE articles SET body = ?1, body_tries = body_tries + 1 WHERE id = ?2').bind(body, id).run();
+export async function countPendingCrawl(env: Env): Promise<number> {
+  const r = await env.DB.prepare('SELECT COUNT(*) AS n FROM articles WHERE crawled = 0').first<{ n: number }>();
+  return r?.n ?? 0;
+}
+
+/** Có nội dung thì lưu và xong; không thì tăng số lần thử, đủ MAX_CRAWL_TRIES thì bỏ cuộc. */
+export async function saveCrawl(env: Env, results: { id: string; body: string | null }[]): Promise<void> {
+  if (!results.length) return;
+  const ok = env.DB.prepare('UPDATE articles SET body = ?1, crawled = 1, body_tries = body_tries + 1 WHERE id = ?2');
+  const fail = env.DB.prepare('UPDATE articles SET body_tries = body_tries + 1, crawled = (body_tries + 1 >= ?1) WHERE id = ?2');
+  await env.DB.batch(results.map((r) => (r.body === null ? fail.bind(MAX_CRAWL_TRIES, r.id) : ok.bind(r.body, r.id))));
 }
 
 export interface Archived {
@@ -151,15 +216,16 @@ export async function getArticle(env: Env, id: string): Promise<Archived | null>
     .first<Archived>();
 }
 
-export interface HistoryQuery {
+interface HistoryQuery {
   q: string;
   source: string;
+  /** '' = tất cả, '1' = đã gửi, '0' = chưa gửi. */
+  sent: '' | '0' | '1';
   page: number; // bắt đầu từ 1
 }
 
 export const PAGE_SIZE = 30;
 
-/** Escape % _ \ để ô tìm link khớp theo đúng ký tự người gõ. */
 const like = (s: string) => `%${s.replace(/[\\%_]/g, '\\$&')}%`;
 
 /**
@@ -174,7 +240,7 @@ export function toFtsQuery(q: string): string {
 const HL_OPEN = '\uE000';
 const HL_CLOSE = '\uE001';
 
-export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) {
+export async function queryHistory(env: Env, { q, source, sent, page }: HistoryQuery) {
   await ensureSchema(env);
   const offset = (Math.max(1, page) - 1) * PAGE_SIZE;
   const fts = /^https?:\/\/|\//i.test(q) ? '' : toFtsQuery(q); // có dấu "/" thì coi là tìm theo link
@@ -183,17 +249,16 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
   let rowsStmt: D1PreparedStatement;
   let countStmt: D1PreparedStatement;
   if (fts) {
-    // Tìm full-text: xếp theo độ liên quan (bm25), tiêu đề được ưu tiên hơn tóm tắt.
-    const src = source ? 'AND a.source = ?' : '';
-    const srcArgs = source ? [source] : [];
+    const src = `${source ? 'AND a.source = ?' : ''} ${sent ? 'AND a.sent = ?' : ''}`;
+    const srcArgs = [...(source ? [source] : []), ...(sent ? [Number(sent)] : [])];
     rowsStmt = env.DB.prepare(
-      `SELECT a.id, a.url, a.title, a.summary, a.source, a.channel, a.published_at AS publishedAt, a.sent_at AS sentAt,
+      `SELECT a.id, a.url, a.title, a.summary, a.source, a.channel, a.published_at AS publishedAt, a.sent_at AS sentAt, a.sent,
               a.body <> '' AS archived,
               CASE WHEN a.body <> '' THEN snippet(articles_fts, 2, '${HL_OPEN}', '${HL_CLOSE}', '…', 24)
                    ELSE snippet(articles_fts, 1, '${HL_OPEN}', '${HL_CLOSE}', '…', 24) END AS excerpt
        FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
        WHERE articles_fts MATCH ? ${src}
-       ORDER BY bm25(articles_fts, 10.0, 2.0, 1.0, 3.0), a.sent_at DESC LIMIT ? OFFSET ?`,
+       ORDER BY MIN(COALESCE(a.published_at, a.sent_at), a.sent_at) DESC, a.id LIMIT ? OFFSET ?`,
     ).bind(fts, ...srcArgs, PAGE_SIZE, offset);
     countStmt = env.DB.prepare(
       `SELECT COUNT(*) AS n FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
@@ -210,10 +275,14 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
       where.push('source = ?');
       args.push(source);
     }
+    if (sent) {
+      where.push('sent = ?');
+      args.push(Number(sent));
+    }
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
     rowsStmt = env.DB.prepare(
-      `SELECT id, url, title, summary, source, channel, published_at AS publishedAt, sent_at AS sentAt, body <> '' AS archived
-       FROM articles ${w} ORDER BY sent_at DESC, id LIMIT ? OFFSET ?`,
+      `SELECT id, url, title, summary, source, channel, published_at AS publishedAt, sent_at AS sentAt, sent, body <> '' AS archived
+       FROM articles ${w} ORDER BY MIN(COALESCE(published_at, sent_at), sent_at) DESC, id LIMIT ? OFFSET ?`,
     ).bind(...args, PAGE_SIZE, offset);
     countStmt = env.DB.prepare(`SELECT COUNT(*) AS n FROM articles ${w}`).bind(...args);
   }
@@ -223,19 +292,16 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
     rows: rows!.results as unknown as HistoryRow[],
     total: (count!.results[0] as { n: number }).n,
     sources: (sources!.results as { source: string }[]).map((r) => r.source),
+    logos: SITE_OF,
     pageSize: PAGE_SIZE,
     hl: [HL_OPEN, HL_CLOSE],
   };
 }
 
-/** Báo khi nguồn lỗi đủ N lượt liên tiếp, rồi nhắc lại mỗi REMIND_EVERY lượt nếu vẫn lỗi. */
 const NOTIFY_AFTER = 3;
 const REMIND_EVERY = 24;
 
-/**
- * Ghi kết quả lượt chạy cho từng nguồn và trả về những nguồn cần báo lỗi (lỗi liên tiếp đủ NOTIFY_AFTER lượt).
- * Nguồn thành công thì đặt lại bộ đếm.
- */
+/** Ghi kết quả từng nguồn; trả về những nguồn cần báo (lỗi liên tiếp đủ NOTIFY_AFTER lượt, rồi nhắc lại mỗi REMIND_EVERY lượt). Thành công thì đặt lại bộ đếm. */
 export async function recordSourceResults(
   env: Env,
   results: { name: string; error?: string }[],

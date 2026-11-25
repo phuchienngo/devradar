@@ -23,7 +23,6 @@ function linkOf(block: string): string | null {
   return null;
 }
 
-/** Giới hạn an toàn số mục đọc từ một feed (feed lớn như Vert.x có hàng trăm bài). */
 const MAX_ENTRIES_PER_FEED = 500;
 
 function dateOf(block: string): number | null {
@@ -32,10 +31,7 @@ function dateOf(block: string): number | null {
   return Number.isNaN(ts) ? null : ts;
 }
 
-/**
- * Đọc mọi mục của feed ở dạng nhẹ (url, tiêu đề, ngày). Thứ tự không quan trọng: index.ts sắp xếp theo ngày trên toàn bộ,
- * vì có feed xếp cũ nhất lên đầu (Vert.x) hoặc không xếp theo ngày (Elastic).
- */
+/** Đọc mọi mục của feed ở dạng nhẹ. Không tin thứ tự: có feed xếp cũ nhất lên đầu (Vert.x) hoặc không theo ngày (Elastic), nên bên gọi tự sắp theo ngày. */
 function parseFeed(xml: string, src: Source): Candidate[] {
   const blocks = (xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) ?? []).slice(0, MAX_ENTRIES_PER_FEED);
   const out: Candidate[] = [];
@@ -48,11 +44,9 @@ function parseFeed(xml: string, src: Source): Candidate[] {
   return out;
 }
 
-/** Tạo tóm tắt và nội dung đầy đủ (Markdown, nếu feed có kèm) cho một bài. Chỉ gọi cho bài sắp gửi. */
 export function hydrate({ block, hydrated, ...rest }: Candidate): Item {
   if (hydrated) return { ...rest, ...hydrated };
   const body = tag(block, 'description') ?? tag(block, 'summary') ?? tag(block, 'content') ?? tag(block, 'content:encoded') ?? '';
-  // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
   const content = [tag(block, 'content:encoded'), tag(block, 'content'), tag(block, 'description'), tag(block, 'summary')]
     .map((x) => (x ? htmlToMarkdown(x, rest.url) : ''))
     .reduce((a, c) => (c.length > a.length ? c : a), '');

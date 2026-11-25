@@ -1,120 +1,143 @@
-import { MAX_AGE_DAYS, MAX_PER_RUN, SOURCES } from './config';
-import { archiveBodies, backfillBodies } from './archive';
+import { FETCH_CONCURRENCY, MAX_INGEST_PER_RUN, MAX_PER_RUN, SOURCES } from './config';
+import { crawlBodies } from './archive';
+import { pool } from './hosts';
 import { hashUrl } from './dedupe';
 import { sendTextToGoogleChat, sendToGoogleChat } from './gchat';
-import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, recordSourceResults, releaseLock } from './history';
+import { acquireLock, countPending, countPendingCrawl, getArticle, ingestArticles, loadSeen, markSent, pendingToSend, queryHistory, recordSourceResults, releaseLock } from './history';
 import { fetchSource, hydrate } from './sources';
 import type { Candidate, Env, Item } from './types';
 import { PAGE, renderArticle } from './pages';
+import { msg } from './util';
 
 export interface RunResult {
   summary: string;
   errors: string[];
 }
 
-const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const newestFirst = (a: { c: Candidate }, b: { c: Candidate }) => (b.c.publishedAt ?? 0) - (a.c.publishedAt ?? 0);
 
-/** Báo lỗi vào Google Chat; chính nó lỗi thì chỉ log (không còn kênh nào khác). */
+/** Báo lỗi vào Google Chat; chính nó lỗi thì chỉ log. */
 async function notify(env: Env, text: string): Promise<void> {
   await sendTextToGoogleChat(env, text).catch((e) => console.error('notify failed:', msg(e)));
 }
 
-/**
- * Mỗi bước được cô lập: một nguồn lỗi hay một lệnh ghi D1 lỗi chỉ làm mất phần việc của nó.
- */
-export async function run(env: Env): Promise<RunResult> {
-  const errors: string[] = [];
-
-  // 1. Nguồn: mỗi nguồn độc lập. Lỗi đơn lẻ (429, timeout) rất thường gặp từ IP Cloudflare nên không báo ngay:
-  //    chỉ báo khi một nguồn lỗi liên tiếp nhiều lượt (xem recordSourceResults).
-  const results = await Promise.allSettled(SOURCES.map((s) => fetchSource(s, env)));
-  const all: Candidate[] = [];
-  const outcomes = results.map((r, i) => {
-    if (r.status === 'fulfilled') {
-      all.push(...r.value);
-      return { name: SOURCES[i]!.name };
-    }
-    return { name: SOURCES[i]!.name, error: msg(r.reason) };
-  });
-  const failed = outcomes.filter((o) => o.error !== undefined);
-  try {
-    for (const f of await recordSourceResults(env, outcomes)) errors.push(`${f.name}: lỗi ${f.fails} lượt liên tiếp (${f.error})`);
-  } catch (e) {
-    console.warn(`source_state: ${msg(e)}`); // D1 hỏng thì bước đọc danh sách đã gửi bên dưới sẽ báo
-  }
-  if (failed.length) console.warn(`sources failed: ${failed.map((f) => `${f.name} (${f.error})`).join('; ')}`);
-
-  // 2. Dedupe bằng bảng lịch sử trong D1. Không đọc được thì không biết bài nào đã gửi → dừng để khỏi gửi trùng.
+/** Pha LƯU: đọc feed và ghi bài mới vào D1 với sent = 0 (mới → cũ). Trả null nếu không đọc được D1: dừng lượt để khỏi lưu/gửi trùng. */
+async function ingest(env: Env, errors: string[]): Promise<{ stats: string } | null> {
   let seen: Set<string>;
   try {
     seen = await loadSeen(env);
   } catch (e) {
-    errors.push(`D1: không đọc được danh sách đã gửi (${msg(e)})`);
-    await notify(env, errors.join('\n'));
-    return { summary: 'aborted: không đọc được D1', errors };
+    errors.push(`D1: không đọc được danh sách đã lưu (${msg(e)})`);
+    return null;
   }
-  const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
 
-  const hashOf = new Map<Candidate, string>();
-  const fresh: Candidate[] = [];
+  // Worker chỉ có 128 MB mà mỗi bài giữ cả XML thô: lọc bài đã có ngay khi đọc xong từng nguồn/trang, và chỉ giữ
+  // tối đa 2 × MAX_INGEST_PER_RUN bài mới nhất (vượt thì cắt bớt bài cũ, lượt sau lấy tiếp).
+  const fresh: { hash: string; c: Candidate }[] = [];
   const dup = new Set<string>();
-  for (const item of all) {
-    const hash = await hashUrl(item.url);
-    if (seen.has(hash) || dup.has(hash)) continue;
-    dup.add(hash);
-    if (item.publishedAt !== null && item.publishedAt < cutoff) continue; // quá cũ: bỏ qua, không cần lưu
-    hashOf.set(item, hash);
-    fresh.push(item);
-  }
-  const base = `sources=${SOURCES.length} failed=${failed.length} fetched=${all.length} new=${fresh.length}`;
+  let fetched = 0;
+  let trimmed = false;
+  const take = async (cands: Candidate[]) => {
+    fetched += cands.length;
+    for (const c of cands) {
+      const hash = await hashUrl(c.url);
+      if (seen.has(hash) || dup.has(hash)) continue;
+      dup.add(hash);
+      fresh.push({ hash, c });
+    }
+    if (fresh.length > 2 * MAX_INGEST_PER_RUN) {
+      fresh.sort(newestFirst);
+      fresh.length = MAX_INGEST_PER_RUN;
+      trimmed = true;
+    }
+  };
 
-  // 3. Mới → cũ: lấy MAX_PER_RUN bài mới nhất CHƯA gửi (đã bỏ bài có trong D1 ở trên). Đủ số thì dừng; chưa đủ thì
-  //    đã lấy sâu vào các bài cũ hơn trong feed. Phần còn lại để các lượt sau. Chỉ tạo nội dung cho bài sắp gửi.
-  fresh.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0));
-  const picked = fresh.slice(0, MAX_PER_RUN);
-  const toSend: Item[] = picked.map(hydrate);
-  const hashOfItem = new Map<Item, string>(toSend.map((it, i) => [it, hashOf.get(picked[i]!)!]));
-  // 4. Gửi; chỉ bài đã gửi được mới bị đánh dấu, bài còn lại thử lại ở lượt sau.
+  // Lỗi đơn lẻ (429, timeout) rất hay gặp từ IP Cloudflare nên chỉ báo khi một nguồn lỗi liên tiếp (xem recordSourceResults).
+  const outcomes: { name: string; error?: string }[] = [];
+  await pool(
+    FETCH_CONCURRENCY,
+    SOURCES.map((s) => async () => {
+      try {
+        await take(await fetchSource(s, env));
+        outcomes.push({ name: s.name });
+      } catch (e) {
+        outcomes.push({ name: s.name, error: msg(e) });
+      }
+    }),
+  );
+  const failed = outcomes.filter((o) => o.error !== undefined);
+  try {
+    for (const f of await recordSourceResults(env, outcomes)) errors.push(`${f.name}: lỗi ${f.fails} lượt liên tiếp (${f.error})`);
+  } catch (e) {
+    console.warn(`source_state: ${msg(e)}`);
+  }
+  if (failed.length) console.warn(`sources failed: ${failed.map((f) => `${f.name} (${f.error})`).join('; ')}`);
+
+  fresh.sort(newestFirst);
+  const newCount = fresh.length;
+  const toIngest = fresh.slice(0, MAX_INGEST_PER_RUN).map(({ hash, c }) => ({ hash, item: hydrate(c) }));
+  fresh.length = 0; // giải phóng khối XML thô trước khi ghi D1
+  let ingested = 0;
+  try {
+    ingested = await ingestArticles(env, toIngest);
+  } catch (e) {
+    errors.push(`D1: lưu bài mới lỗi (${msg(e)})`);
+  }
+  return { stats: `failed=${failed.length} fetched=${fetched} new=${newCount}${trimmed ? '+' : ''} ingested=${ingested}` };
+}
+
+async function send(env: Env, errors: string[]): Promise<number> {
+  let pending: Awaited<ReturnType<typeof pendingToSend>> = [];
+  try {
+    pending = await pendingToSend(env, MAX_PER_RUN);
+  } catch (e) {
+    errors.push(`D1: không đọc được hàng đợi chưa gửi (${msg(e)})`);
+  }
+  const idOf = new Map<Item, string>(pending.map((p) => [p.item, p.id]));
+
+  // Chỉ bài gửi được mới bị đánh dấu; bài còn lại vẫn sent = 0 và thử lại ở lượt sau.
   let sent: Item[] = [];
   try {
-    const r = await sendToGoogleChat(env, toSend);
+    const r = await sendToGoogleChat(env, pending.map((p) => p.item));
     sent = r.sent;
     if (r.error) errors.push(r.error);
   } catch (e) {
     errors.push(`Google Chat: ${msg(e)}`);
   }
-
-  // 5. Lưu nội dung bài (feed nếu đủ dài, không thì tải trang). Lỗi ở đây không ảnh hưởng gì khác.
-  let bodies: string[] = [];
   try {
-    bodies = await archiveBodies(sent);
+    await markSent(env, sent.map((item) => idOf.get(item)!));
   } catch (e) {
-    console.warn(`archive: ${msg(e)}`);
+    errors.push(`D1: đánh dấu đã gửi lỗi, các bài vừa gửi có thể bị gửi lại (${msg(e)})`);
+  }
+  return sent.length;
+}
+
+/** Một lượt: lưu bài mới, gửi, rồi crawl nội dung. Mỗi pha được cô lập: lỗi ở đâu chỉ mất phần việc ở đó. */
+export async function run(env: Env): Promise<RunResult> {
+  const errors: string[] = [];
+  const stage = await ingest(env, errors);
+  if (!stage) {
+    await notify(env, errors.join('\n'));
+    return { summary: 'aborted: không đọc được D1', errors };
+  }
+  const parts = [`sources=${SOURCES.length}`, stage.stats, `sent=${await send(env, errors)}`];
+
+  try {
+    parts.push(`crawled=${await crawlBodies(env)}`);
+  } catch (e) {
+    console.warn(`crawl: ${msg(e)}`);
   }
 
-  // 6. Ghi D1: vừa là lịch sử vừa đánh dấu đã gửi. Lỗi ở đây nghĩa là các bài đó có thể bị gửi lại.
-  try {
-    await logToHistory(env, sent.map((item, i) => ({ hash: hashOfItem.get(item)!, item, body: bodies[i] ?? '' })));
-  } catch (e) {
-    errors.push(`D1: ghi lịch sử lỗi, các bài vừa gửi có thể bị gửi lại (${msg(e)})`);
-  }
-
-  // 7. Thử lại các bài gần đây chưa lưu được nội dung
-  let backfilled = 0;
-  try {
-    backfilled = await backfillBodies(env);
-  } catch (e) {
-    console.warn(`backfill: ${msg(e)}`);
-  }
-
+  const [toSend, toCrawl] = await Promise.all([countPending(env), countPendingCrawl(env)]).catch(() => [-1, -1]);
+  parts.push(`queue_send=${toSend}`, `queue_crawl=${toCrawl}`, `errors=${errors.length}`);
   if (errors.length) {
     console.warn(errors.join(' ; '));
     await notify(env, errors.join('\n'));
   }
-  return { summary: `${base} sent=${sent.length} archived=${bodies.filter(Boolean).length} backfilled=${backfilled} errors=${errors.length}`, errors };
+  return { summary: parts.join(' '), errors };
 }
 
-/** Khoá (bảng `locks` trong D1) để cron và trigger thủ công không chạy chồng nhau, tránh gửi trùng. Hết hạn sau 10 phút. */
+/** Khoá (bảng `locks`) để cron và nút bấm không chạy chồng nhau; tự hết hạn sau 10 phút. */
 async function runLocked(env: Env): Promise<RunResult> {
   let locked = false;
   try {
@@ -147,12 +170,7 @@ export default {
     );
   },
 
-  /**
-   * GET /  → trang có nút "Xem trước" / "Chạy ngay" và mục lịch sử (dùng trong trình duyệt).
-   * GET /history?q=&source=&page= → dữ liệu lịch sử cho trang.
-   * POST /run → do chính trang đó gọi. KHÔNG có xác thực trong code:
-   * phải bật Cloudflare Access cho workers.dev trước khi deploy.
-   */
+  /** Không có xác thực trong code: domain của Worker phải nằm sau Cloudflare Access. */
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === '/' && req.method === 'GET') {
@@ -161,7 +179,7 @@ export default {
     if (url.pathname === '/history' && req.method === 'GET') {
       try {
         const page = Number(url.searchParams.get('page')) || 1;
-        const data = await queryHistory(env, { q: (url.searchParams.get('q') ?? '').slice(0, 100), source: url.searchParams.get('source') ?? '', page });
+        const data = await queryHistory(env, { q: (url.searchParams.get('q') ?? '').slice(0, 100), source: url.searchParams.get('source') ?? '', sent: ['0', '1'].includes(url.searchParams.get('sent') ?? '') ? (url.searchParams.get('sent') as '0' | '1') : '', page });
         return Response.json(data, { headers: { 'cache-control': 'no-store' } });
       } catch (e) {
         return Response.json({ error: msg(e) }, { status: 500 });

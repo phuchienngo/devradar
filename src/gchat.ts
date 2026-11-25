@@ -6,7 +6,6 @@ const ICON: Record<string, string> = { backend: '⚙️', ai: '🤖', security: 
 
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** Mỗi bài là một card: tiêu đề + nguồn, đoạn trích, nút "Đọc bài". */
 function card(it: Item, n: number, image: string | null) {
   const widgets: unknown[] = [];
   if (image) widgets.push({ image: { imageUrl: image, altText: it.title.slice(0, 100), onClick: { openLink: { url: it.url } } } });
@@ -36,10 +35,7 @@ async function post(url: string, body: unknown): Promise<void> {
   if (!res.ok) throw new Error(`Google Chat ${res.status}: ${(await res.text()).slice(0, 160)}`);
 }
 
-/**
- * Mỗi bài một tin, cách nhau ~1,1 giây (~1 request/giây/space).
- * Dừng ở lỗi đầu tiên; trả về các bài đã gửi được để caller chỉ đánh dấu những bài đó.
- */
+/** Mỗi bài một tin, cách nhau ~1,1 s (webhook giới hạn ~1 request/giây). Dừng ở lỗi đầu tiên và trả các bài đã gửi được để chỉ đánh dấu những bài đó. */
 export async function sendToGoogleChat(env: Env, items: Item[]): Promise<{ sent: Item[]; error?: string }> {
   const sent: Item[] = [];
   if (!items.length) return { sent };
@@ -56,7 +52,6 @@ export async function sendToGoogleChat(env: Env, items: Item[]): Promise<{ sent:
   return { sent };
 }
 
-/** Tin văn bản thường, dùng cho cảnh báo lỗi. */
 export async function sendTextToGoogleChat(env: Env, text: string): Promise<void> {
   await post(env.GOOGLE_CHAT_WEBHOOK_URL, { text: `⚠️ devradar\n${text}`.slice(0, 3900) });
 }

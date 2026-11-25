@@ -25,10 +25,7 @@ function abstractOf(idx: OaWork['abstract_inverted_index']): string {
 
 const normTitle = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-/**
- * Paper của các công ty lớn tại các hội nghị hệ thống / CSDL / thuật toán, qua OpenAlex (API công khai, trả JSON).
- * Cùng một paper có thể xuất hiện ở hai nguồn (vd. SIGMOD và PACMMOD) nên dedupe theo tiêu đề.
- */
+/** Paper qua OpenAlex. Một paper có thể ở hai nguồn (vd. SIGMOD và PACMMOD) nên dedupe theo tiêu đề. */
 export async function fetchPapers(src: Source, apiKey?: string): Promise<Candidate[]> {
   const from = new Date(Date.now() - PAPER_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
   const filter = [
@@ -45,7 +42,6 @@ export async function fetchPapers(src: Source, apiKey?: string): Promise<Candida
     if (apiKey) headers.authorization = `Bearer ${apiKey}`;
     const res = await fetchRetry(url, { headers }, { retries: 2, maxWaitMs: 10_000 });
     if (!res.ok) {
-      // 429 có nhiều lý do (hết ngân sách ngày / quá nhanh); nói rõ để biết có cần khoá API không
       const reason = await res.json().then((j) => (j as { reason?: string }).reason, () => undefined);
       throw new Error(`HTTP ${res.status}${reason ? ` (${reason})` : ''}${apiKey ? '' : ', chưa đặt OPENALEX_API_KEY'}`);
     }

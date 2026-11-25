@@ -2,10 +2,9 @@ export type Channel = 'backend' | 'ai' | 'security' | 'paper';
 
 export interface Source {
   name: string;
-  type: 'rss' | 'atom' | 'papers';
+  type: 'rss' | 'papers';
   url: string;
   channel: Channel;
-  /** Tắt một nguồn bằng enabled: false. */
   enabled: boolean;
 }
 
@@ -17,12 +16,8 @@ const rss = (name: string, url: string, channel: Channel, enabled = true): Sourc
   enabled,
 });
 
-/**
- * Engineering blogs của các công ty/tổ chức lớn. Nguồn: tuan3w/awesome-tech-rss (feeds.opml)
- * + blog chính thức của stack (Spring, Kotlin, Go). Không có blog cá nhân/newsletter/học thuật.
- * Tất cả đều bật (đang dùng Workers Paid nên không lo giới hạn 50 subrequest của gói free).
- */
-export const BLOGS: Source[] = [
+/** Engineering blog của các công ty/tổ chức lớn (nguồn: tuan3w/awesome-tech-rss) và blog chính thức của stack. Không có blog cá nhân/newsletter. */
+const BLOGS: Source[] = [
   // ---- Backend / hạ tầng ----
   rss('Cloudflare', 'https://blog.cloudflare.com/rss/', 'backend'),
   rss('Netflix Tech', 'https://netflixtechblog.com/feed', 'backend'),
@@ -133,10 +128,7 @@ export const BLOGS: Source[] = [
   rss('Amazon Science', 'https://www.amazon.science/index.rss', 'ai'),
 ];
 
-/**
- * Paper của các công ty lớn tại hội nghị hệ thống / CSDL / thuật toán (qua OpenAlex). Mã lấy từ OpenAlex: một hội nghị có thể
- * có nhiều mã. Các hội nghị ghi "chưa có dữ liệu mới" thì OpenAlex hiện chưa cập nhật; để sẵn, có bài là tự lấy.
- */
+/** Hội nghị lấy paper (mã OpenAlex; một hội nghị có thể có nhiều mã). Nhóm cuối chưa có dữ liệu mới trong OpenAlex nên để sẵn. */
 export const PAPER_VENUES: Record<string, string[]> = {
   VLDB: ['S4210226185'],
   SIGMOD: ['S4393915683', 'S4387289859'], // hội nghị + PACMMOD
@@ -156,7 +148,7 @@ export const PAPER_VENUES: Record<string, string[]> = {
   PODC: ['S7407086807'],
   SODA: ['S4306420974', 'S4363608728'],
 };
-/** Tổ chức tác giả (mã OpenAlex, gồm cả đơn vị con). Cloudflare không có trong OpenAlex. */
+/** Công ty (mã OpenAlex, gồm đơn vị con). Cloudflare không có trong OpenAlex. */
 export const PAPER_COMPANIES: Record<string, string> = {
   Google: 'I1291425158',
   'Google DeepMind': 'I4210090411',
@@ -172,16 +164,75 @@ export const PAPER_COMPANIES: Record<string, string> = {
   Databricks: 'I4401726825',
   Snowflake: 'I4400600931',
 };
-/** Chỉ lấy paper công bố trong N ngày gần đây (tránh xả cả lịch sử). */
 export const PAPER_WINDOW_DAYS = 365;
 
 // Cần secret OPENALEX_API_KEY: không có khoá thì OpenAlex hay trả 429 từ IP Cloudflare dùng chung.
+/** Tên miền để lấy logo khi khác tên miền gốc của feed (blog nằm trên Medium/GitHub, logo công ty ở tên miền khác) và logo hội nghị cho paper. */
+const SITE_OVERRIDES: Record<string, string> = {
+  'Engineering at Meta': 'meta.com',
+  'Instagram Engineering (Meta)': 'instagram.com',
+  'GitHub Engineering': 'github.com',
+  'Spotify Engineering': 'spotify.com',
+  'Shopify Engineering': 'shopify.com',
+  'Dropbox Tech': 'dropbox.com',
+  'Airbnb Tech (Medium)': 'airbnb.com',
+  'Pinterest Engineering (Medium)': 'pinterest.com',
+  'Airtable Engineering (Medium)': 'airtable.com',
+  'Booking.com (Medium)': 'booking.com',
+  'eBay Tech': 'ebay.com',
+  'Canva Engineering': 'canva.com',
+  'Kotlin (JetBrains)': 'kotlinlang.org',
+  Ktor: 'ktor.io',
+  'Inside Java (OpenJDK)': 'openjdk.org',
+  'Vert.x releases': 'vertx.io',
+  'LY Corp (LINE)': 'line.me',
+  'Google Cloud Databases': 'cloud.google.com',
+  'Google Security Blog': 'google.com',
+  'Project Zero': 'google.com',
+  'Google Research': 'google.com',
+  'Kaspersky Securelist': 'kaspersky.com',
+  'AWS Architecture': 'aws.amazon.com',
+  'AWS Database': 'aws.amazon.com',
+  'AWS Compute': 'aws.amazon.com',
+  'AWS Open Source': 'aws.amazon.com',
+  'AWS Security Bulletins': 'aws.amazon.com',
+  VLDB: 'vldb.org',
+  SIGMOD: 'sigmod.org',
+  ICDE: 'ieee.org',
+  SOSP: 'sigops.org',
+  EuroSys: 'eurosys.org',
+  ASPLOS: 'asplos-conference.org',
+  SIGCOMM: 'sigcomm.org',
+  STOC: 'sigact.org',
+  FOCS: 'ieee-focs.org',
+};
+
+/** Tên miền gốc của một host (bỏ www/blog/engineering…; giữ 3 nhãn cho đuôi kiểu co.jp). */
+const rootDomain = (host: string): string => {
+  const labels = host.replace(/^www\./, '').split('.');
+  const n = labels.length > 2 && labels.at(-1)!.length === 2 && ['co', 'com', 'org', 'ac'].includes(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-n).join('.');
+};
+
+/** Nguồn → tên miền dùng lấy logo (trang web hiển thị logo công ty thay cho chữ cái đầu). */
+export const SITE_OF: Record<string, string> = {
+  ...Object.fromEntries(BLOGS.map((b) => [b.name, rootDomain(new URL(b.url).hostname)])),
+  ...SITE_OVERRIDES,
+};
+
 const PAPERS: Source = { name: 'Paper (hội nghị lớn)', type: 'papers', url: 'https://api.openalex.org/works', channel: 'paper', enabled: true };
 
 export const SOURCES: Source[] = [...BLOGS, PAPERS].filter((s) => s.enabled);
 
-/** Tối đa số bài gửi mỗi lần chạy (mỗi bài một card, cách nhau ~1,1s). Phần dư để lần sau. */
-export const MAX_PER_RUN = 10;
-/** Bỏ bài cũ hơn N ngày (nếu parse được ngày). Infinity = không giới hạn tuổi. */
-export const MAX_AGE_DAYS = Infinity;
+/** Số bài gửi Google Chat mỗi giờ (card cách nhau ~1,1 s). Phần còn lại ở sent = 0 để các lượt sau. */
+export const MAX_PER_RUN = 1;
+/** Số bài mới lưu vào D1 mỗi lượt, mới → cũ. Lưu không gửi gì nên cho nhiều hơn số bài gửi. */
+export const MAX_INGEST_PER_RUN = 1000;
+/** Số bài crawl nội dung đầy đủ mỗi lượt (mỗi giờ). */
+export const CRAWL_PER_RUN = 100;
+/** Nội dung từ feed dài hơn mức này (ký tự) thì coi là đủ bài, khỏi tải trang. */
+export const FULL_TEXT_MIN_CHARS = 1500;
+export const MAX_CRAWL_TRIES = 3;
+/** Số nguồn đọc cùng lúc (giữ bộ nhớ Worker 128 MB không bị vượt). */
+export const FETCH_CONCURRENCY = 8;
 export const FETCH_TIMEOUT_MS = 15000;

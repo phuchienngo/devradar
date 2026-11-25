@@ -9,6 +9,8 @@
 {{{head}}}
 <style>
   .ava { flex:none; width:40px; height:40px; border-radius:10px; display:grid; place-items:center; font-weight:700; color:#fff; }
+  .ava.logo { background:#fff; border:1px solid var(--bs-border-color); }
+  .ava img { width:26px; height:26px; object-fit:contain; }
   .card-item { transition:border-color .15s, transform .15s; } .card-item:hover { border-color:var(--bs-primary); transform:translateY(-1px); }
   .ex { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
   mark { background:#fde68a; color:#000; border-radius:3px; padding:0 2px; }
@@ -24,11 +26,11 @@
   <div class="container py-3" style="max-width:860px">
     <div class="row g-3 align-items-center">
       <div class="col-12 col-sm">
-        <h1 class="h4 mb-0">📡 devradar</h1>
-        <div class="text-body-secondary small">Tin kỹ thuật từ các engineering blog, gửi về Google Chat mỗi giờ.</div>
+        <h1 class="h4 mb-0">devradar</h1>
+        <div class="text-body-secondary small">Tin kỹ thuật từ các engineering blog, gửi về Google Chat mỗi giờ một bài.</div>
       </div>
       <div class="col-12 col-sm-auto d-flex gap-2">
-        <button id="run" class="btn btn-primary w-100">▶️ Chạy ngay</button>
+        <button id="run" class="btn btn-primary w-100">Chạy ngay</button>
       </div>
     </div>
   </div>
@@ -41,10 +43,11 @@
 
   <div class="toolbar py-2"><div class="row g-2">
     <div class="col-12 col-md position-relative">
-      <input id="q" type="search" class="form-control form-control-lg fs-6" placeholder="🔎 Tìm theo tiêu đề, tóm tắt hoặc link…" autocomplete="off">
+      <input id="q" type="search" class="form-control form-control-lg fs-6" placeholder="Tìm theo tiêu đề, tóm tắt hoặc link…" autocomplete="off">
       <kbd id="kbd" class="slash d-none d-md-inline">/</kbd>
     </div>
-    <div class="col-12 col-md-4"><select id="src" class="form-select form-select-lg fs-6"><option value="">Mọi nguồn</option></select></div>
+    <div class="col-7 col-md-3"><select id="src" class="form-select form-select-lg fs-6"><option value="">Mọi nguồn</option></select></div>
+    <div class="col-5 col-md-2"><select id="sent" class="form-select form-select-lg fs-6"><option value="">Tất cả</option><option value="1">Đã gửi</option><option value="0">Chưa gửi</option></select></div>
   </div></div>
   <div id="hmsg" class="text-body-secondary small my-2" style="min-height:1.4em"></div>
   <ul id="hist" class="list-unstyled d-grid gap-2 mb-0"></ul>
@@ -55,7 +58,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 async function go() {
-  if (!confirm('Chạy ngay? Bot sẽ gửi các bài mới vào Google Chat.')) return;
+  if (!confirm('Chạy ngay? Bot sẽ đọc feed, lưu bài mới và gửi 1 bài vào Google Chat.')) return;
   const btn = $('run');
   btn.disabled = true;
   $('out').classList.remove('d-none');
@@ -101,23 +104,37 @@ function excerpt(text, hl) {
   return x;
 }
 
-function card(r, hl) {
+// Logo công ty (favicon theo tên miền); không tải được thì dùng chữ cái đầu của nguồn
+function avatar(source, site) {
+  const ava = document.createElement('div'); ava.className = 'ava';
+  const letter = () => { ava.className = 'ava'; ava.replaceChildren(); ava.style.background = 'hsl(' + hue(source) + ' 55% 45%)'; ava.textContent = (source.trim()[0] || '?').toUpperCase(); };
+  if (!site) { letter(); return ava; }
+  const img = new Image(); img.alt = ''; img.loading = 'lazy';
+  img.src = 'https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(site);
+  img.onerror = letter;
+  ava.classList.add('logo'); ava.append(img);
+  return ava;
+}
+
+function card(r, hl, logos) {
   const li = document.createElement('li'); li.className = 'card card-item shadow-sm';
   const row = document.createElement('div'); row.className = 'card-body d-flex gap-3 p-3';
-  const ava = document.createElement('div'); ava.className = 'ava';
-  ava.style.background = 'hsl(' + hue(r.source) + ' 55% 45%)';
-  ava.textContent = (r.source.trim()[0] || '?').toUpperCase();
+  const ava = avatar(r.source, logos[r.source]);
   const body = document.createElement('div'); body.className = 'flex-grow-1 min-w-0'; body.style.minWidth = '0';
   const a = document.createElement('a'); a.className = 'fw-semibold text-body text-decoration-none d-block'; a.style.overflowWrap = 'anywhere';
   a.href = r.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = r.title;
    const m = document.createElement('div'); m.className = 'd-flex flex-wrap align-items-center gap-2 mt-1 small text-body-secondary';
   const chip = document.createElement('span'); chip.className = 'badge text-bg-primary-subtle text-primary-emphasis rounded-pill'; chip.textContent = r.source;
-  const when = document.createElement('span'); when.textContent = r.publishedAt ? 'đăng ' + ago(r.publishedAt) : 'gửi ' + ago(r.sentAt);
-  when.title = 'Gửi lúc ' + new Date(r.sentAt).toLocaleString('vi-VN');
+  const when = document.createElement('span'); when.textContent = r.publishedAt ? 'đăng ' + ago(r.publishedAt) : (r.sent ? 'gửi ' : 'lưu ') + ago(r.sentAt);
+  when.title = (r.sent ? 'Gửi lúc ' : 'Lưu vào DB lúc ') + new Date(r.sentAt).toLocaleString('vi-VN');
   m.append(chip, when);
+  if (!r.sent) {
+    const pend = document.createElement('span'); pend.className = 'badge text-bg-warning-subtle text-warning-emphasis rounded-pill'; pend.textContent = 'Chưa gửi';
+    m.append(pend);
+  }
   if (r.archived) {
     const rd = document.createElement('a'); rd.href = '/read?id=' + encodeURIComponent(r.id); rd.target = '_blank'; rd.rel = 'noopener';
-    rd.className = 'small text-decoration-none'; rd.textContent = '📄 Bản lưu';
+    rd.className = 'small text-decoration-none'; rd.textContent = 'Bản lưu';
     m.append(rd);
   }
   body.append(a, m);
@@ -131,7 +148,7 @@ async function loadHist() {
   const my = ++seq;
   $('hmsg').textContent = '';
   $('hist').replaceChildren(...[1, 2, 3].map(() => { const s = document.createElement('li'); s.className = 'card placeholder-glow'; const p = document.createElement('div'); p.className = 'card-body'; const l = document.createElement('span'); l.className = 'placeholder col-8'; const l2 = document.createElement('span'); l2.className = 'placeholder col-5 mt-2 d-block'; p.append(l, l2); s.append(p); return s; }));
-  const qs = new URLSearchParams({ q: $('q').value.trim(), source: $('src').value, page: String(page) });
+  const qs = new URLSearchParams({ q: $('q').value.trim(), source: $('src').value, sent: $('sent').value, page: String(page) });
   try {
     const res = await fetch('/history?' + qs);
     const ct = res.headers.get('content-type') || '';
@@ -145,10 +162,10 @@ async function loadHist() {
     }
     if (d.rows.length === 0) {
       const e = document.createElement('li'); e.className = 'text-center text-body-secondary py-5';
-      e.textContent = $('q').value || $('src').value ? 'Không tìm thấy bài nào khớp.' : 'Chưa có bài nào được gửi.';
+      e.textContent = $('q').value || $('src').value || $('sent').value ? 'Không tìm thấy bài nào khớp.' : 'Chưa có bài nào.';
       $('hist').replaceChildren(e);
     } else {
-      $('hist').replaceChildren(...d.rows.map((r) => card(r, d.hl)));
+      $('hist').replaceChildren(...d.rows.map((r) => card(r, d.hl, d.logos || {})));
     }
     const pages = Math.max(1, Math.ceil(d.total / d.pageSize));
     $('hmsg').textContent = d.total + ' bài' + ($('q').value ? ' khớp' : '');
@@ -160,7 +177,7 @@ async function loadHist() {
   }
 }
 $('q').oninput = () => { clearTimeout(timer); timer = setTimeout(() => { page = 1; loadHist(); }, 300); };
-$('src').onchange = () => { page = 1; loadHist(); };
+$('src').onchange = $('sent').onchange = () => { page = 1; loadHist(); };
 $('prev').onclick = () => { page--; loadHist(); scrollTo(0, 0); };
 $('next').onclick = () => { page++; loadHist(); scrollTo(0, 0); };
 document.addEventListener('keydown', (e) => {

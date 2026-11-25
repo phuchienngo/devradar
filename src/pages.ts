@@ -3,7 +3,6 @@ import INDEX from './web/index.html';
 import READ from './web/read.html';
 import { render } from './template';
 
-/** Trang điều khiển (tĩnh, dựng một lần). */
 export const PAGE = render(INDEX, { head: HEAD });
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);

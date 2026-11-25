@@ -1,23 +1,18 @@
-/**
- * User-Agent dùng chung cho mọi request ra ngoài (feed, trang bài, ảnh). Khai rõ là trình đọc RSS: đo thực tế cho thấy
- * cách này qua được nhiều site hơn UA giả trình duyệt (một số site chặn UA "Chrome" từ máy chủ vì không giống Chrome thật).
- */
+import { sleep } from './util';
+
+/** User-Agent chung cho mọi request ra ngoài. Khai là trình đọc RSS qua được nhiều site hơn UA giả Chrome (một số site chặn Chrome giả từ máy chủ). */
 export const USER_AGENT = 'Mozilla/5.0 (compatible; devradar/0.1; +rss reader)';
 
 interface RetryOpts {
-  /** Số lần thử lại tối đa (không tính lần đầu). */
   retries?: number;
   /** Chờ tối đa mỗi lần; server yêu cầu chờ lâu hơn thì bỏ cuộc và trả luôn response. */
   maxWaitMs?: number;
-  /** Timeout mỗi lần gọi. */
   timeoutMs?: number;
-  /** Mã trạng thái được thử lại. */
   statuses?: number[];
   /** Tự đọc thời gian chờ (ms) từ response, ví dụ trường retry_after trong body JSON. null = dùng header/backoff. */
   delayFrom?: (res: Response) => Promise<number | null>;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function retryAfterHeader(res: Response): number | null {
   const h = res.headers.get('retry-after');
@@ -27,10 +22,7 @@ function retryAfterHeader(res: Response): number | null {
   return Number.isNaN(t) ? null : Math.max(0, t - Date.now());
 }
 
-/**
- * fetch có thử lại khi gặp 429/503: ưu tiên thời gian server yêu cầu (Retry-After),
- * không có thì backoff luỹ thừa + jitter. Luôn trả về response cuối cùng (kể cả khi vẫn lỗi).
- */
+/** fetch thử lại khi 429/503 (ưu tiên Retry-After, không có thì backoff + jitter). Luôn trả response cuối cùng, kể cả khi vẫn lỗi. */
 export async function fetchRetry(url: string, init: RequestInit = {}, opts: RetryOpts = {}): Promise<Response> {
   const { retries = 3, maxWaitMs = 20_000, timeoutMs = 15_000, statuses = [429, 503] } = opts;
   for (let attempt = 0; ; attempt++) {
@@ -38,7 +30,6 @@ export async function fetchRetry(url: string, init: RequestInit = {}, opts: Retr
     try {
       res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
-      // Timeout / lỗi mạng: thử lại đúng một lần rồi mới bỏ cuộc
       if (attempt >= Math.min(retries, 1)) throw e;
       await sleep(1000 + Math.random() * 500);
       continue;
