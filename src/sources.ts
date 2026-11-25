@@ -32,7 +32,7 @@ function dateOf(block: string): number | null {
 }
 
 /** Đọc mọi mục của feed ở dạng nhẹ. Không tin thứ tự: có feed xếp cũ nhất lên đầu (Vert.x) hoặc không theo ngày (Elastic), nên bên gọi tự sắp theo ngày. */
-function parseFeed(xml: string, src: Source): Candidate[] {
+export function parseFeed(xml: string, src: Source): Candidate[] {
   const blocks = (xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) ?? []).slice(0, MAX_ENTRIES_PER_FEED);
   const out: Candidate[] = [];
   for (const block of blocks) {
@@ -64,5 +64,6 @@ export async function fetchSource(src: Source, env?: Pick<Env, 'OPENALEX_API_KEY
     { retries: 2, maxWaitMs: 10_000, timeoutMs: FETCH_TIMEOUT_MS },
   );
   if (!res.ok) throw new Error(`${src.name}: HTTP ${res.status}`);
-  return parseFeed(await res.text(), src);
+  const items = parseFeed(await res.text(), src);
+  return src.only ? items.filter((c) => c.url.includes(src.only!) && !c.url.endsWith(src.only!)) : items;
 }

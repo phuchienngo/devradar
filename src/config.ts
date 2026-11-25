@@ -6,20 +6,25 @@ export interface Source {
   url: string;
   channel: Channel;
   enabled: boolean;
+  /** Chỉ giữ bài có link chứa chuỗi này (feed toàn site lẫn cả trang không phải bài blog). */
+  only?: string;
 }
 
-const rss = (name: string, url: string, channel: Channel, enabled = true): Source => ({
+const rss = (name: string, url: string, channel: Channel, enabled = true, only?: string): Source => ({
   name,
   type: 'rss',
   url,
   channel,
   enabled,
+  only,
 });
 
 /** Engineering blog của các công ty/tổ chức lớn (nguồn: tuan3w/awesome-tech-rss) và blog chính thức của stack. Không có blog cá nhân/newsletter. */
 const BLOGS: Source[] = [
   // ---- Backend / hạ tầng ----
   rss('Cloudflare', 'https://blog.cloudflare.com/rss/', 'backend'),
+  rss('ScyllaDB', 'https://www.scylladb.com/feed/', 'backend'),
+  rss('VictoriaMetrics', 'https://victoriametrics.com/index.xml', 'backend', true, '/blog/'), // feed toàn site; chung blog với VictoriaLogs
   rss('Netflix Tech', 'https://netflixtechblog.com/feed', 'backend'),
   rss('Engineering at Meta', 'https://engineering.fb.com/feed/', 'backend'),
   rss('GitHub Engineering', 'https://github.blog/engineering/feed/', 'backend'),
