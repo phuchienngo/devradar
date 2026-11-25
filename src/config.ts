@@ -104,7 +104,7 @@ export const BLOGS: Source[] = [
   rss('Sourcegraph', 'https://sourcegraph.com/blog/rss.xml', 'backend'),
   rss('Martin Fowler', 'https://martinfowler.com/feed.atom', 'backend'),
   rss('Baeldung', 'https://www.baeldung.com/feed', 'backend'),
-  rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend', false) /* tắt: chặn UA trình duyệt (403) */,
+  rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend'),
 
   // ---- Bảo mật / CVE / lỗ hổng ----
   rss('Spring Security Advisories', 'https://spring.io/security.atom', 'security'),

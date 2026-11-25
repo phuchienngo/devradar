@@ -1,6 +1,8 @@
-/** User-Agent của Chrome trên macOS (định dạng đã rút gọn, chỉ còn số phiên bản chính). Dùng chung cho mọi request ra ngoài. */
-export const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
+/**
+ * User-Agent dùng chung cho mọi request ra ngoài (feed, trang bài, ảnh). Khai rõ là trình đọc RSS: đo thực tế cho thấy
+ * cách này qua được nhiều site hơn UA giả trình duyệt (một số site chặn UA "Chrome" từ máy chủ vì không giống Chrome thật).
+ */
+export const USER_AGENT = 'Mozilla/5.0 (compatible; devradar/0.1; +rss reader)';
 
 interface RetryOpts {
   /** Số lần thử lại tối đa (không tính lần đầu). */
