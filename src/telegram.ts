@@ -1,3 +1,4 @@
+import { fetchRetry } from './http';
 import type { Env, Item } from './types';
 
 const LIMIT = 4096;
@@ -18,10 +19,17 @@ interface SendOpts {
   silent?: boolean;
 }
 
+// Telegram báo thời gian chờ trong body: {"parameters":{"retry_after":N}}
+async function telegramRetryAfter(res: Response): Promise<number | null> {
+  const j = (await res.clone().json()) as { parameters?: { retry_after?: number } };
+  const s = j.parameters?.retry_after;
+  return typeof s === 'number' ? s * 1000 : null;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function sendText(env: Env, text: string, opts: SendOpts = {}, retry = true): Promise<void> {
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+export async function sendText(env: Env, text: string, opts: SendOpts = {}): Promise<void> {
+  const res = await fetchRetry(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -31,12 +39,7 @@ export async function sendText(env: Env, text: string, opts: SendOpts = {}, retr
       disable_web_page_preview: !opts.preview,
       disable_notification: opts.silent ?? false,
     }),
-  });
-  if (res.status === 429 && retry) {
-    const j = (await res.json().catch(() => null)) as { parameters?: { retry_after?: number } } | null;
-    await sleep(Math.min(j?.parameters?.retry_after ?? 2, 10) * 1000);
-    return sendText(env, text, opts, false);
-  }
+  }, { delayFrom: telegramRetryAfter });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 

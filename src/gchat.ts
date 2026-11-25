@@ -1,3 +1,4 @@
+import { fetchRetry } from './http';
 import { fetchOgImages } from './ogimage';
 import type { Env, Item } from './types';
 
@@ -25,16 +26,12 @@ function card(it: Item, n: number, image: string | null) {
   };
 }
 
-async function post(url: string, body: unknown, retry = true): Promise<void> {
-  const res = await fetch(url, {
+async function post(url: string, body: unknown): Promise<void> {
+  const res = await fetchRetry(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json; charset=UTF-8' },
     body: JSON.stringify(body),
   });
-  if (res.status === 429 && retry) {
-    await new Promise((r) => setTimeout(r, 2000));
-    return post(url, body, false);
-  }
   // Không đưa URL (chứa key/token) vào thông báo lỗi.
   if (!res.ok) throw new Error(`Google Chat ${res.status}: ${(await res.text()).slice(0, 160)}`);
 }

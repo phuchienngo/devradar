@@ -1,4 +1,5 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
+import { fetchRetry } from './http';
 import type { Item } from './types';
 
 const ENTITIES: Record<string, string> = {
@@ -57,11 +58,14 @@ export function parseFeed(xml: string, src: Source): Item[] {
 }
 
 export async function fetchSource(src: Source): Promise<Item[]> {
-  const res = await fetch(src.url, {
-    headers: { 'user-agent': 'devradar/0.1 (+rss reader)', accept: 'application/rss+xml, application/atom+xml, text/xml, */*' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    redirect: 'follow',
-  });
+  const res = await fetchRetry(
+    src.url,
+    {
+      headers: { 'user-agent': 'devradar/0.1 (+rss reader)', accept: 'application/rss+xml, application/atom+xml, text/xml, */*' },
+      redirect: 'follow',
+    },
+    { retries: 2, maxWaitMs: 10_000, timeoutMs: FETCH_TIMEOUT_MS },
+  );
   if (!res.ok) throw new Error(`${src.name}: HTTP ${res.status}`);
   return parseFeed(await res.text(), src);
 }

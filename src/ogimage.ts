@@ -1,3 +1,5 @@
+import { fetchRetry } from './http';
+
 const MAX_BYTES = 120_000;
 const META = /<meta\b[^>]*>/gi;
 
@@ -7,11 +9,11 @@ const attr = (tag: string, name: string) => tag.match(new RegExp(`\\b${name}\\s*
 /** Lấy og:image (hoặc twitter:image) của một trang; null nếu không có/lỗi. Chỉ đọc phần đầu HTML. */
 export async function fetchOgImage(pageUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(pageUrl, {
-      headers: { 'user-agent': 'Mozilla/5.0 (compatible; devradar/0.1)', accept: 'text/html' },
-      signal: AbortSignal.timeout(8000),
-      redirect: 'follow',
-    });
+    const res = await fetchRetry(
+      pageUrl,
+      { headers: { 'user-agent': 'Mozilla/5.0 (compatible; devradar/0.1)', accept: 'text/html' }, redirect: 'follow' },
+      { retries: 2, maxWaitMs: 8000, timeoutMs: 8000 },
+    );
     if (!res.ok || !res.body) return null;
 
     const reader = res.body.getReader();
@@ -50,15 +52,32 @@ function resolve(src: string, base: string): string | null {
   }
 }
 
-/** Lấy ảnh cho nhiều bài, tối đa `limit` request cùng lúc. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const hostOf = (u: string) => {
+  try {
+    return new URL(u).hostname;
+  } catch {
+    return u;
+  }
+};
+
+/**
+ * Lấy ảnh cho nhiều bài. Bài cùng một host được tải tuần tự (cách nhau 400ms) để tránh bị 429;
+ * các host khác nhau chạy song song, tối đa `limit` host cùng lúc.
+ */
 export async function fetchOgImages(urls: string[], limit = 6): Promise<(string | null)[]> {
   const out: (string | null)[] = new Array(urls.length).fill(null);
-  let next = 0;
+  const groups = new Map<string, number[]>();
+  urls.forEach((u, i) => groups.set(hostOf(u), [...(groups.get(hostOf(u)) ?? []), i]));
+
+  const queue = [...groups.values()];
   await Promise.all(
-    Array.from({ length: Math.min(limit, urls.length) }, async () => {
-      while (next < urls.length) {
-        const i = next++;
-        out[i] = await fetchOgImage(urls[i]!);
+    Array.from({ length: Math.min(limit, queue.length) }, async () => {
+      for (let g = queue.shift(); g; g = queue.shift()) {
+        for (const [k, i] of g.entries()) {
+          if (k > 0) await sleep(400);
+          out[i] = await fetchOgImage(urls[i]!);
+        }
       }
     }),
   );
