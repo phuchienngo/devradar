@@ -1,4 +1,4 @@
-export type Channel = 'backend' | 'ai' | 'releases' | 'digest';
+export type Channel = 'backend' | 'ai' | 'security' | 'releases' | 'digest';
 
 export interface Source {
   name: string;
@@ -105,6 +105,18 @@ export const BLOGS: Source[] = [
   rss('Martin Fowler', 'https://martinfowler.com/feed.atom', 'backend'),
   rss('Baeldung', 'https://www.baeldung.com/feed', 'backend'),
   rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend'),
+
+  // ---- Bảo mật / CVE / lỗ hổng ----
+  rss('Spring Security Advisories', 'https://spring.io/security.atom', 'security'),
+  rss('Kubernetes CVE feed', 'https://kubernetes.io/docs/reference/issues-security/official-cve-feed/feed.xml', 'security'),
+  rss('AWS Security Bulletins', 'https://aws.amazon.com/security/security-bulletins/feed/', 'security'),
+  rss('CISA Advisories', 'https://www.cisa.gov/cybersecurity-advisories/all.xml', 'security'),
+  rss('Project Zero', 'https://googleprojectzero.blogspot.com/feeds/posts/default', 'security'),
+  rss('Google Security Blog', 'https://security.googleblog.com/feeds/posts/default', 'security'),
+  rss('Socket.dev (supply chain)', 'https://socket.dev/api/blog/feed.atom', 'security'),
+  rss('Trail of Bits', 'https://blog.trailofbits.com/feed/', 'security'),
+  rss('PortSwigger Research', 'https://portswigger.net/research/rss', 'security'),
+  rss('Krebs on Security', 'https://krebsonsecurity.com/feed/', 'security'),
 
   // ---- AI ----
   rss('OpenAI Engineering', 'https://openai.com/news/engineering/rss.xml', 'ai'),
