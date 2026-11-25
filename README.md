@@ -5,7 +5,7 @@ và gửi **mỗi bài một card** vào Google Chat. Không dùng LLM, không l
 
 - Dedupe, lịch sử và khoá chống chạy chồng đều nằm trong **Cloudflare D1**.
 - Có trang web (`GET /`) để xem trước / chạy tay và **tìm lại lịch sử** (full-text search).
-- Deploy tự động qua GitHub Actions.
+- Deploy bằng `npm run deploy` (workflow GitHub Actions đã được gỡ tạm).
 
 ## Luồng chạy
 
@@ -56,14 +56,10 @@ Yêu cầu: Node 22+, tài khoản Cloudflare **gói Workers Paid** (bot cần n
 5. **Bảo vệ trang điều khiển bằng Cloudflare Access.** Code **không có xác thực**: ai vào được trang là bấm được
    "Chạy ngay" và xem lịch sử. Hãy gắn domain riêng (hoặc workers.dev) vào một *Access application* với policy
    chỉ cho email của bạn **trước khi** deploy. `workers_dev` đang tắt, chỉ vào qua domain riêng.
-6. **GitHub Actions:** thêm hai secret ở *Settings → Secrets and variables → Actions*:
-   - `CLOUDFLARE_API_TOKEN`: template *Edit Cloudflare Workers* (thêm quyền **D1 Edit** nếu deploy báo lỗi D1).
-   - `CLOUDFLARE_ACCOUNT_ID`: ID tài khoản Cloudflare.
 
 ## Deploy
 
-Push lên `main` → workflow `.github/workflows/deploy.yml` chạy `npm ci`, typecheck, `wrangler deploy`.
-Cũng có thể bấm tay ở tab Actions, hoặc chạy cục bộ: `npm run deploy`.
+Chạy `npm run deploy` (cần đã `wrangler login`). Workflow GitHub Actions từng có (typecheck + deploy khi push `main`) đã bị revert; khôi phục bằng `git revert` commit revert đó.
 
 > **Lần chạy đầu:** D1 trống nên bot sẽ gửi ngay 30 bài mới nhất (≤ 3 ngày) vào chat, phần còn lại gửi dần ở các giờ sau.
 
