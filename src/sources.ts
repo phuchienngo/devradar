@@ -1,6 +1,6 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
 import { fetchRetry } from './http';
-import { decode, htmlToText, stripTags } from './text';
+import { decode, htmlToMarkdown, stripTags } from './text';
 import type { Item } from './types';
 
 function tag(block: string, name: string): string | null {
@@ -34,7 +34,7 @@ export function parseFeed(xml: string, src: Source): Item[] {
     const body = tag(b, 'description') ?? tag(b, 'summary') ?? tag(b, 'content') ?? tag(b, 'content:encoded') ?? '';
     // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
     const full = [tag(b, 'content:encoded'), tag(b, 'content'), tag(b, 'description'), tag(b, 'summary')]
-      .map((x) => (x ? htmlToText(x) : ''))
+      .map((x) => (x ? htmlToMarkdown(x, url) : ''))
       .reduce((a, c) => (c.length > a.length ? c : a), '');
     items.push({
       url,

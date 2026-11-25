@@ -23,6 +23,7 @@ const BASE = [
     summary TEXT NOT NULL DEFAULT '', -- đoạn tóm tắt lấy từ feed
     body TEXT NOT NULL DEFAULT '',    -- nội dung bài (văn bản thô), '' nếu chưa lưu được
     body_tries INTEGER NOT NULL DEFAULT 0, -- số lần thử lưu nội dung
+    body_fmt INTEGER NOT NULL DEFAULT 0,   -- 0 = văn bản thô (bản cũ), 1 = Markdown
     source TEXT NOT NULL,
     channel TEXT NOT NULL,
     published_at INTEGER,          -- epoch ms, có thể NULL
@@ -62,8 +63,12 @@ async function migrate(env: Env): Promise<void> {
   const stmts: string[] = [];
   if (!cols.has('body')) stmts.push("ALTER TABLE articles ADD COLUMN body TEXT NOT NULL DEFAULT ''");
   if (!cols.has('body_tries')) stmts.push('ALTER TABLE articles ADD COLUMN body_tries INTEGER NOT NULL DEFAULT 0');
+  if (!cols.has('body_fmt')) stmts.push('ALTER TABLE articles ADD COLUMN body_fmt INTEGER NOT NULL DEFAULT 0');
   if (!stmts.length) return;
-  stmts.push('DROP TRIGGER IF EXISTS articles_ai', 'DROP TRIGGER IF EXISTS articles_ad', 'DROP TRIGGER IF EXISTS articles_au', 'DROP TABLE IF EXISTS articles_fts');
+  // FTS cũ không có cột body: bỏ để dựng lại. (Thêm body_fmt thì FTS không ảnh hưởng.)
+  if (!cols.has('body')) {
+    stmts.push('DROP TRIGGER IF EXISTS articles_ai', 'DROP TRIGGER IF EXISTS articles_ad', 'DROP TRIGGER IF EXISTS articles_au', 'DROP TABLE IF EXISTS articles_fts');
+  }
   await env.DB.batch(stmts.map((q) => env.DB.prepare(q)));
 }
 
@@ -115,11 +120,11 @@ export async function logToHistory(env: Env, entries: { hash: string; item: Item
   await ensureSchema(env);
   const now = Date.now();
   const stmt = env.DB.prepare(
-    'INSERT OR IGNORE INTO articles (id, url, title, summary, body, body_tries, source, channel, published_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO articles (id, url, title, summary, body, body_tries, body_fmt, source, channel, published_at, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   await env.DB.batch(
     entries.map(({ hash, item: it, body }) =>
-      stmt.bind(hash, it.url, it.title, it.snippet, body, body ? 0 : 1, it.source, it.channel, it.publishedAt, now),
+      stmt.bind(hash, it.url, it.title, it.snippet, body, body ? 0 : 1, body ? 1 : 0, it.source, it.channel, it.publishedAt, now),
     ),
   );
 }
@@ -127,23 +132,50 @@ export async function logToHistory(env: Env, entries: { hash: string; item: Item
 const BACKFILL_WINDOW_MS = 3 * 86_400_000;
 const MAX_BODY_TRIES = 3;
 
-/** Bài gần đây chưa lưu được nội dung và còn lượt thử. */
-export async function backfillCandidates(env: Env, limit: number): Promise<{ id: string; url: string }[]> {
+const FORCE_MAX_TRIES = 6;
+
+/**
+ * Bài cần lưu nội dung. Mặc định (cron): bài gần đây còn trống, tối đa 3 lần thử.
+ * force (bấm tay): mọi bài còn trống HOẶC còn là văn bản thô (bản cũ) để nâng lên Markdown;
+ * bài thất bại nhiều lần xếp sau, quá 6 lần thì bỏ.
+ */
+export async function backfillCandidates(env: Env, limit: number, force = false): Promise<{ id: string; url: string }[]> {
   await ensureSchema(env);
-  const { results } = await env.DB.prepare(
-    "SELECT id, url FROM articles WHERE body = '' AND body_tries < ?1 AND sent_at > ?2 ORDER BY sent_at DESC LIMIT ?3",
-  )
-    .bind(MAX_BODY_TRIES, Date.now() - BACKFILL_WINDOW_MS, limit)
-    .all<{ id: string; url: string }>();
-  return results;
+  const stmt = force
+    ? env.DB.prepare(
+        `SELECT id, url FROM articles WHERE (body = '' OR body_fmt = 0) AND body_tries < ?1
+         ORDER BY body_tries ASC, (body <> '') ASC, sent_at DESC LIMIT ?2`,
+      ).bind(FORCE_MAX_TRIES, limit)
+    : env.DB.prepare("SELECT id, url FROM articles WHERE body = '' AND body_tries < ?1 AND sent_at > ?2 ORDER BY sent_at DESC LIMIT ?3").bind(
+        MAX_BODY_TRIES,
+        Date.now() - BACKFILL_WINDOW_MS,
+        limit,
+      );
+  return (await stmt.all<{ id: string; url: string }>()).results;
 }
 
-/** Ghi kết quả một lần thử: có nội dung thì lưu, không thì chỉ tăng số lần thử. */
+/** Số bài còn cần xử lý bằng nút bấm tay. */
+export async function countMissingBodies(env: Env): Promise<number> {
+  await ensureSchema(env);
+  return (
+    (await env.DB.prepare('SELECT COUNT(*) AS n FROM articles WHERE (body = \'\' OR body_fmt = 0) AND body_tries < ?').bind(FORCE_MAX_TRIES).first<{ n: number }>())?.n ?? 0
+  );
+}
+
+/** Ghi kết quả một lần thử: lấy được thì thay bằng bản Markdown mới; không thì giữ bản cũ và chỉ tăng số lần thử. */
 export async function saveBody(env: Env, id: string, body: string): Promise<void> {
-  await env.DB.prepare('UPDATE articles SET body = ?1, body_tries = body_tries + 1 WHERE id = ?2').bind(body, id).run();
+  await env.DB.prepare(
+    `UPDATE articles SET body = CASE WHEN ?1 <> '' THEN ?1 ELSE body END,
+                         body_fmt = CASE WHEN ?1 <> '' THEN 1 ELSE body_fmt END,
+                         body_tries = body_tries + 1
+     WHERE id = ?2`,
+  )
+    .bind(body, id)
+    .run();
 }
 
 export interface Archived {
+  id: string;
   title: string;
   url: string;
   source: string;
@@ -155,7 +187,7 @@ export interface Archived {
 export async function getArticle(env: Env, id: string): Promise<Archived | null> {
   await ensureSchema(env);
   return env.DB.prepare(
-    'SELECT title, url, source, published_at AS publishedAt, sent_at AS sentAt, body FROM articles WHERE id = ?',
+    'SELECT id, title, url, source, published_at AS publishedAt, sent_at AS sentAt, body FROM articles WHERE id = ?',
   )
     .bind(id)
     .first<Archived>();

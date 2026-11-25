@@ -37,6 +37,7 @@ export const PAGE = `<!doctype html>
         <div class="text-body-secondary small">Tin kỹ thuật từ các engineering blog, gửi về Google Chat mỗi giờ.</div>
       </div>
       <div class="col-12 col-sm-auto d-flex gap-2">
+        <button id="fill" class="btn btn-outline-secondary flex-fill" title="Lưu nội dung (Markdown) cho bài chưa có bản lưu, và nâng bản văn bản thô cũ lên Markdown">📥 Lưu nội dung</button>
         <button id="dry" class="btn btn-outline-primary flex-fill">👀 Xem trước</button>
         <button id="run" class="btn btn-primary flex-fill">▶️ Chạy ngay</button>
       </div>
@@ -92,6 +93,20 @@ async function go(dry) {
     btns.forEach((b) => (b.disabled = false));
   }
 }
+$('fill').onclick = async () => {
+  const b = $('fill'); b.disabled = true;
+  $('out').classList.remove('d-none'); $('list').replaceChildren(); $('errs').textContent = '';
+  $('sum').textContent = 'Đang lưu nội dung (Markdown)… (tối đa 40 bài mỗi lần, có thể mất vài chục giây)';
+  try {
+    const res = await fetch('/backfill', { method: 'POST' });
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('json')) throw new Error('HTTP ' + res.status + (res.redirected ? ' (phiên đăng nhập hết hạn? tải lại trang)' : ''));
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    $('sum').textContent = 'Đã lưu/cập nhật ' + d.filled + ' bài. Còn ' + d.remaining + ' bài cần xử lý' + (d.remaining > 0 ? ' (bấm lại để tiếp tục; bài đã bị site xoá hoặc chặn bot sẽ giữ bản cũ).' : '.');
+    loadHist();
+  } catch (e) { $('sum').textContent = 'Lỗi: ' + e.message; } finally { b.disabled = false; }
+};
 $('dry').onclick = () => go(true);
 $('run').onclick = () => go(false);
 
@@ -194,43 +209,62 @@ loadHist();
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** Trang đọc bản lưu của một bài. Mọi chuỗi đều được escape; chỉ nhận link http(s). */
-export function renderArticle(a: { title: string; url: string; source: string; publishedAt: number | null; sentAt: number; body: string }): string {
+/** Trang đọc bản lưu (Markdown). Chuỗi nào cũng được escape; render bằng marked rồi lọc bằng DOMPurify; chỉ nhận link http(s). */
+export function renderArticle(a: { id: string; title: string; url: string; source: string; publishedAt: number | null; sentAt: number; body: string }): string {
   const safeUrl = /^https?:\/\//i.test(a.url) ? a.url : '#';
   const fmt = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-  const paras = a.body
-    .split(/\n{2,}/)
-    .map((p) => '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>')
-    .join('\n');
   return `<!doctype html>
 <html lang="vi">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
 <title>${esc(a.title)} · devradar</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.9/dist/css/bootstrap.min.css"
   integrity="sha384-yEPZ7jP9S0QKiUQ0m3jjsO4ProIW7wvR9gXkI7JOGa2XVsw53Yke2bsdkBbjmmiX" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/marked@18.3.0/lib/marked.umd.js"
+  integrity="sha384-hH4NOxDIQY57RnVrD2fqqLH/RL4DK2iPPnw/nHh2KuepyxA6z62hUUPNnuXf6AMX" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.5.0/dist/purify.min.js"
+  integrity="sha384-DOUwTXbuiiQxlONuue5N42674XXDfjIJ/LTPtJMZ2ZV1Ir4NRQ3OnM/yM505YQAc" crossorigin="anonymous"></script>
 <script>
   const mq = matchMedia('(prefers-color-scheme: dark)');
   const setTheme = () => document.documentElement.setAttribute('data-bs-theme', mq.matches ? 'dark' : 'light');
   setTheme(); mq.addEventListener('change', setTheme);
 </script>
-<style> article { line-height:1.75; font-size:1.05rem; overflow-wrap:anywhere; } article p { margin:0 0 1rem; } </style>
+<style>
+  #doc { line-height:1.75; font-size:1.05rem; overflow-wrap:anywhere; }
+  #doc img { max-width:100%; height:auto; border-radius:6px; }
+  #doc pre { background:var(--bs-tertiary-bg); border:1px solid var(--bs-border-color); padding:12px 14px; border-radius:8px; overflow:auto; line-height:1.5; font-size:.9rem; }
+  #doc code { font-size:.9em; } #doc :not(pre) > code { background:var(--bs-tertiary-bg); padding:1px 5px; border-radius:4px; }
+  #doc blockquote { border-left:4px solid var(--bs-border-color); margin:0 0 1rem; padding:.25rem 1rem; color:var(--bs-secondary-color); }
+  #doc table { border-collapse:collapse; } #doc td, #doc th { border:1px solid var(--bs-border-color); padding:4px 8px; }
+  #raw { white-space:pre-wrap; margin:0; font:inherit; }
+</style>
 </head>
 <body class="bg-body-tertiary">
-<main class="container py-4" style="max-width:760px">
+<main class="container py-4" style="max-width:780px">
   <a href="/" class="text-decoration-none small">← Quay lại</a>
   <h1 class="h3 mt-2">${esc(a.title)}</h1>
   <div class="text-body-secondary small mb-3">
     ${esc(a.source)}${a.publishedAt ? ' · đăng ' + fmt(a.publishedAt) : ''} · lưu ${fmt(a.sentAt)} ·
-    <a href="${esc(safeUrl)}" target="_blank" rel="noopener">bản gốc ↗</a>
+    <a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer">bản gốc ↗</a> ·
+    <a href="/read?id=${esc(a.id)}&amp;format=md">⬇ .md</a>
   </div>
-  <div class="alert alert-secondary small">Bản lưu văn bản thô để tra cứu cá nhân; ảnh, định dạng và code block có thể bị mất.</div>
-  <article class="card card-body shadow-sm">
-${paras}
-  </article>
+  <div class="alert alert-secondary small">Bản lưu Markdown để tra cứu cá nhân; ảnh vẫn tải từ site gốc nên có thể mất nếu họ xoá.</div>
+  <article id="doc" class="card card-body shadow-sm"><pre id="raw">${esc(a.body)}</pre></article>
 </main>
+<script>
+  // Có marked + DOMPurify thì render; không (CDN lỗi) thì giữ nguyên bản Markdown thô ở trên.
+  if (window.marked && window.DOMPurify) {
+    DOMPurify.addHook('afterSanitizeAttributes', (n) => {
+      if (n.tagName === 'A') { n.setAttribute('target', '_blank'); n.setAttribute('rel', 'noopener noreferrer'); }
+      if (n.tagName === 'IMG') { n.setAttribute('loading', 'lazy'); n.setAttribute('referrerpolicy', 'no-referrer'); }
+    });
+    const doc = document.getElementById('doc');
+    doc.innerHTML = DOMPurify.sanitize(marked.parse(document.getElementById('raw').textContent));
+  }
+</script>
 </body>
 </html>`;
 }

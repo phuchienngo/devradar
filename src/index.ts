@@ -99,7 +99,7 @@ export async function run(env: Env, dry = false): Promise<RunResult> {
   // 7. Thử lại các bài gần đây chưa lưu được nội dung
   let backfilled = 0;
   try {
-    backfilled = await backfillBodies(env);
+    backfilled = (await backfillBodies(env)).filled;
   } catch (e) {
     console.warn(`backfill: ${msg(e)}`);
   }
@@ -168,7 +168,21 @@ export default {
       const id = url.searchParams.get('id') ?? '';
       const a = /^[0-9a-f]{16}$/.test(id) ? await getArticle(env, id).catch(() => null) : null;
       if (!a || !a.body) return new Response('Không có bản lưu cho bài này', { status: 404 });
+      if (url.searchParams.get('format') === 'md') {
+        return new Response(`# ${a.title}\n\nNguồn: ${a.source} · ${a.url}\n\n${a.body}\n`, {
+          headers: { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="${id}.md"`, 'cache-control': 'no-store' },
+        });
+      }
       return new Response(renderArticle(a), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/backfill') {
+      if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });
+      if (!sameOrigin(req, url)) return new Response('Forbidden', { status: 403 });
+      try {
+        return Response.json(await backfillBodies(env, { force: true, limit: 40 }));
+      } catch (e) {
+        return Response.json({ error: msg(e) }, { status: 500 });
+      }
     }
     if (url.pathname !== '/run') return new Response('Not found', { status: 404 });
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });

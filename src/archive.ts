@@ -1,7 +1,7 @@
 import { perHost } from './hosts';
-import { backfillCandidates, saveBody } from './history';
+import { backfillCandidates, countMissingBodies, saveBody } from './history';
 import { fetchRetry } from './http';
-import { htmlToText } from './text';
+import { htmlToMarkdown } from './text';
 import type { Env, Item } from './types';
 
 /** Feed đã kèm nội dung dài hơn mức này thì coi là đủ bài, khỏi tải trang. */
@@ -12,14 +12,31 @@ const MAX_HTML_BYTES = 2_000_000;
 const MIN_PAGE_CHARS = 200; // ít hơn: trang render bằng JS hoặc bị chặn, coi như không lấy được
 const BACKFILL_PER_RUN = 10;
 
-/** Phần thân bài trong HTML: <article> dài nhất, rồi <main>, rồi <body>. */
-function mainHtml(html: string): string {
+const ENOUGH_CHARS = 1500;
+
+/**
+ * Văn bản thân bài: bỏ script/style trước, rồi thử lần lượt <article> (cái nhiều chữ nhất), <main>, <body>;
+ * lấy ứng viên đầu tiên đủ dài, không có thì lấy ứng viên nhiều chữ nhất. (Một số site chỉ dùng <article>
+ * cho các card "bài liên quan", nên không thể tin <article> một cách mù quáng.)
+ */
+function mainText(rawHtml: string, base: string): string {
+  const html = rawHtml.replace(/<(script|style|noscript|svg|template)\b[\s\S]*?<\/\1>/gi, ' ');
+  const text = (h: string) => htmlToMarkdown(h.slice(0, 600_000), base);
   let best = '';
-  for (const m of html.matchAll(/<article\b[\s\S]*?<\/article>/gi)) if (m[0].length > best.length) best = m[0];
-  if (best.length > 2000) return best;
+  const consider = (t: string) => {
+    if (t.length > best.length) best = t;
+    return t.length >= ENOUGH_CHARS;
+  };
+  let article = '';
+  for (const m of html.matchAll(/<article\b[\s\S]*?<\/article>/gi)) {
+    const t = text(m[0]);
+    if (t.length > article.length) article = t;
+  }
+  if (article && consider(article)) return article;
   const main = html.match(/<main\b[\s\S]*?<\/main>/i)?.[0];
-  if (main && main.length > 2000) return main;
-  return html.match(/<body\b[\s\S]*<\/body>/i)?.[0] ?? html;
+  if (main && consider(text(main))) return best;
+  consider(text(html.match(/<body\b[\s\S]*<\/body>/i)?.[0] ?? html));
+  return best;
 }
 
 /** Tải trang và bóc văn bản; '' nếu lỗi / không phải HTML / gần như trống. */
@@ -44,7 +61,7 @@ export async function fetchArticleText(url: string): Promise<string> {
     }
     await reader.cancel().catch(() => {});
 
-    const text = htmlToText(mainHtml(html).slice(0, 600_000));
+    const text = mainText(html, res.url || url);
     return text.length >= MIN_PAGE_CHARS ? text.slice(0, BODY_MAX_CHARS) : '';
   } catch {
     return '';
@@ -65,11 +82,17 @@ export async function archiveBodies(items: Item[]): Promise<string[]> {
   );
 }
 
-/** Thử lại các bài gần đây chưa lưu được nội dung (tối đa 3 lần mỗi bài). Trả về số bài lưu thêm được. */
-export async function backfillBodies(env: Env): Promise<number> {
-  const pending = await backfillCandidates(env, BACKFILL_PER_RUN);
-  if (!pending.length) return 0;
-  const texts = await perHost(pending.map((p) => p.url), (u) => fetchArticleText(u), '');
-  await Promise.all(pending.map((p, i) => saveBody(env, p.id, texts[i] ?? '')));
-  return texts.filter(Boolean).length;
+/**
+ * Lưu nội dung cho các bài còn trống. Cron gọi mặc định (bài gần đây, tối đa 3 lần);
+ * nút bấm tay dùng force + limit lớn hơn. Trả về số bài lưu thêm được và số bài còn trống.
+ */
+export async function backfillBodies(env: Env, opts: { force?: boolean; limit?: number } = {}): Promise<{ filled: number; remaining: number }> {
+  const pending = await backfillCandidates(env, opts.limit ?? BACKFILL_PER_RUN, opts.force ?? false);
+  let filled = 0;
+  if (pending.length) {
+    const texts = await perHost(pending.map((p) => p.url), (u) => fetchArticleText(u), '');
+    await Promise.all(pending.map((p, i) => saveBody(env, p.id, texts[i] ?? '')));
+    filled = texts.filter(Boolean).length;
+  }
+  return { filled, remaining: await countMissingBodies(env) };
 }
