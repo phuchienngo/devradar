@@ -13,3 +13,6 @@ export interface Item {
   /** Văn bản đầy đủ nếu feed có kèm; rỗng nếu chỉ có tóm tắt. */
   content: string;
 }
+
+/** Bài vừa đọc từ feed, chưa tạo tóm tắt/nội dung (việc đó tốn CPU nên chỉ làm cho bài sắp gửi). `block` là đoạn XML gốc. */
+export type Candidate = Omit<Item, 'snippet' | 'content'> & { block: string };

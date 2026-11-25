@@ -9,7 +9,7 @@
   // Chạy fetch handler (trang web) gần D1 ở APAC. Không ảnh hưởng cron.
   "placement": { "region": "aws:ap-southeast-1" },
   "triggers": {
-    "crons": ["0 */3 * * *"]
+    "crons": ["0 * * * *"]
   },
   "d1_databases": [
     {

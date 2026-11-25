@@ -135,7 +135,7 @@ export const BLOGS: Source[] = [
 export const SOURCES: Source[] = BLOGS.filter((s) => s.enabled);
 
 /** Tối đa số bài gửi mỗi lần chạy (mỗi bài một card, cách nhau ~1,1s). Phần dư để lần sau. */
-export const MAX_PER_RUN = 30;
-/** Bỏ bài cũ hơn N ngày (nếu parse được ngày). */
-export const MAX_AGE_DAYS = 3;
+export const MAX_PER_RUN = 10;
+/** Bỏ bài cũ hơn N ngày (nếu parse được ngày). Infinity = không giới hạn tuổi. */
+export const MAX_AGE_DAYS = Infinity;
 export const FETCH_TIMEOUT_MS = 15000;

@@ -1,7 +1,7 @@
 import { FETCH_TIMEOUT_MS, type Source } from './config';
 import { fetchRetry, USER_AGENT } from './http';
 import { decode, htmlToMarkdown, stripTags } from './text';
-import type { Item } from './types';
+import type { Candidate, Item } from './types';
 
 function tag(block: string, name: string): string | null {
   const m = block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i'));
@@ -22,7 +22,8 @@ function linkOf(block: string): string | null {
   return null;
 }
 
-const MAX_ITEMS_PER_FEED = 15;
+/** Giới hạn an toàn số mục đọc từ một feed (feed lớn như Vert.x có hàng trăm bài). */
+const MAX_ENTRIES_PER_FEED = 500;
 
 function dateOf(block: string): number | null {
   const date = tag(block, 'pubDate') ?? tag(block, 'published') ?? tag(block, 'updated') ?? tag(block, 'dc:date');
@@ -30,40 +31,33 @@ function dateOf(block: string): number | null {
   return Number.isNaN(ts) ? null : ts;
 }
 
-function parseFeed(xml: string, src: Source): Item[] {
-  const blocks = xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) ?? [];
-  // Không tin thứ tự trong feed: có feed xếp cũ nhất lên đầu (Vert.x, 250 bài từ 2015), có feed không xếp theo ngày (Elastic).
-  // Sắp xếp mới → cũ theo ngày rồi mới lấy N bài; mục không có ngày giữ nguyên thứ tự và xếp trước.
-  const newestFirst = blocks
-    .map((block, i) => ({ block, i, ts: dateOf(block) ?? Number.MAX_SAFE_INTEGER }))
-    .sort((a, b) => b.ts - a.ts || a.i - b.i)
-    .map((x) => x.block);
-
-  const items: Item[] = [];
-  for (const b of newestFirst.slice(0, MAX_ITEMS_PER_FEED)) {
-    const url = linkOf(b);
-    const title = tag(b, 'title');
+/**
+ * Đọc mọi mục của feed ở dạng nhẹ (url, tiêu đề, ngày). Thứ tự không quan trọng: index.ts sắp xếp theo ngày trên toàn bộ,
+ * vì có feed xếp cũ nhất lên đầu (Vert.x) hoặc không xếp theo ngày (Elastic).
+ */
+function parseFeed(xml: string, src: Source): Candidate[] {
+  const blocks = (xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) ?? []).slice(0, MAX_ENTRIES_PER_FEED);
+  const out: Candidate[] = [];
+  for (const block of blocks) {
+    const url = linkOf(block);
+    const title = tag(block, 'title');
     if (!url || !title) continue;
-    const ts = dateOf(b);
-    const body = tag(b, 'description') ?? tag(b, 'summary') ?? tag(b, 'content') ?? tag(b, 'content:encoded') ?? '';
-    // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
-    const full = [tag(b, 'content:encoded'), tag(b, 'content'), tag(b, 'description'), tag(b, 'summary')]
-      .map((x) => (x ? htmlToMarkdown(x, url) : ''))
-      .reduce((a, c) => (c.length > a.length ? c : a), '');
-    items.push({
-      url,
-      title: stripTags(title),
-      source: src.name,
-      channel: src.channel,
-      publishedAt: ts,
-      snippet: stripTags(body).slice(0, 500),
-      content: full,
-    });
+    out.push({ url, title: stripTags(title), source: src.name, channel: src.channel, publishedAt: dateOf(block), block });
   }
-  return items;
+  return out;
 }
 
-export async function fetchSource(src: Source): Promise<Item[]> {
+/** Tạo tóm tắt và nội dung đầy đủ (Markdown, nếu feed có kèm) cho một bài. Chỉ gọi cho bài sắp gửi. */
+export function hydrate({ block, ...rest }: Candidate): Item {
+  const body = tag(block, 'description') ?? tag(block, 'summary') ?? tag(block, 'content') ?? tag(block, 'content:encoded') ?? '';
+  // Nội dung đầy đủ nếu feed có kèm (content:encoded / content; một số feed nhét cả bài vào description)
+  const content = [tag(block, 'content:encoded'), tag(block, 'content'), tag(block, 'description'), tag(block, 'summary')]
+    .map((x) => (x ? htmlToMarkdown(x, rest.url) : ''))
+    .reduce((a, c) => (c.length > a.length ? c : a), '');
+  return { ...rest, snippet: stripTags(body).slice(0, 500), content };
+}
+
+export async function fetchSource(src: Source): Promise<Candidate[]> {
   const res = await fetchRetry(
     src.url,
     {

@@ -3,8 +3,8 @@ import { archiveBodies, backfillBodies } from './archive';
 import { hashUrl } from './dedupe';
 import { sendTextToGoogleChat, sendToGoogleChat } from './gchat';
 import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, releaseLock } from './history';
-import { fetchSource } from './sources';
-import type { Env, Item } from './types';
+import { fetchSource, hydrate } from './sources';
+import type { Candidate, Env, Item } from './types';
 import { PAGE, renderArticle } from './pages';
 
 export interface RunResult {
@@ -27,7 +27,7 @@ export async function run(env: Env): Promise<RunResult> {
 
   // 1. Nguồn: mỗi nguồn độc lập
   const results = await Promise.allSettled(SOURCES.map(fetchSource));
-  const all: Item[] = [];
+  const all: Candidate[] = [];
   results.forEach((r, i) => {
     if (r.status === 'fulfilled') all.push(...r.value);
     else errors.push(`${SOURCES[i]!.name}: ${msg(r.reason)}`);
@@ -44,8 +44,8 @@ export async function run(env: Env): Promise<RunResult> {
   }
   const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
 
-  const hashOf = new Map<Item, string>();
-  const fresh: Item[] = [];
+  const hashOf = new Map<Candidate, string>();
+  const fresh: Candidate[] = [];
   const dup = new Set<string>();
   for (const item of all) {
     const hash = await hashUrl(item.url);
@@ -57,9 +57,12 @@ export async function run(env: Env): Promise<RunResult> {
   }
   const base = `sources=${SOURCES.length} fetched=${all.length} new=${fresh.length}`;
 
-  // 3. Cũ → mới để đọc theo thứ tự thời gian; phần vượt MAX_PER_RUN gửi ở lần sau.
-  fresh.sort((a, b) => (a.publishedAt ?? 0) - (b.publishedAt ?? 0));
-  const toSend = fresh.slice(0, MAX_PER_RUN);
+  // 3. Mới → cũ: lấy MAX_PER_RUN bài mới nhất CHƯA gửi (đã bỏ bài có trong D1 ở trên). Đủ số thì dừng; chưa đủ thì
+  //    đã lấy sâu vào các bài cũ hơn trong feed. Phần còn lại để các lượt sau. Chỉ tạo nội dung cho bài sắp gửi.
+  fresh.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0));
+  const picked = fresh.slice(0, MAX_PER_RUN);
+  const toSend: Item[] = picked.map(hydrate);
+  const hashOfItem = new Map<Item, string>(toSend.map((it, i) => [it, hashOf.get(picked[i]!)!]));
   // 4. Gửi; chỉ bài đã gửi được mới bị đánh dấu, bài còn lại thử lại ở lượt sau.
   let sent: Item[] = [];
   try {
@@ -80,7 +83,7 @@ export async function run(env: Env): Promise<RunResult> {
 
   // 6. Ghi D1: vừa là lịch sử vừa đánh dấu đã gửi. Lỗi ở đây nghĩa là các bài đó có thể bị gửi lại.
   try {
-    await logToHistory(env, sent.map((item, i) => ({ hash: hashOf.get(item)!, item, body: bodies[i] ?? '' })));
+    await logToHistory(env, sent.map((item, i) => ({ hash: hashOfItem.get(item)!, item, body: bodies[i] ?? '' })));
   } catch (e) {
     errors.push(`D1: ghi lịch sử lỗi, các bài vừa gửi có thể bị gửi lại (${msg(e)})`);
   }
