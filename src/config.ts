@@ -175,7 +175,8 @@ export const PAPER_COMPANIES: Record<string, string> = {
 /** Chỉ lấy paper công bố trong N ngày gần đây (tránh xả cả lịch sử). */
 export const PAPER_WINDOW_DAYS = 365;
 
-const PAPERS: Source = { name: 'Paper (hội nghị lớn)', type: 'papers', url: 'https://api.openalex.org/works', channel: 'paper', enabled: true };
+// Tạm tắt: OpenAlex hay trả 429 từ IP Cloudflare khi chưa có OPENALEX_API_KEY. Bật lại bằng enabled: true.
+const PAPERS: Source = { name: 'Paper (hội nghị lớn)', type: 'papers', url: 'https://api.openalex.org/works', channel: 'paper', enabled: false };
 
 export const SOURCES: Source[] = [...BLOGS, PAPERS].filter((s) => s.enabled);
 

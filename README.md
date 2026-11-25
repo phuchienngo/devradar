@@ -17,7 +17,7 @@ nút "Chạy ngay"      ─┴─► khoá (D1) ─► tải ~80 feed (đọc h�
                                          ─► ghi bài đã gửi vào D1 (vừa là lịch sử vừa là dedupe)
 ```
 
-- Mỗi nguồn độc lập: một feed lỗi không ảnh hưởng nguồn khác. Lỗi được báo vào chính Google Chat.
+- Mỗi nguồn độc lập: một feed lỗi không ảnh hưởng nguồn khác. Lỗi đơn lẻ (429, timeout) rất hay gặp từ IP Cloudflare nên **chỉ báo vào Google Chat khi một nguồn lỗi 3 lượt liên tiếp** (rồi nhắc lại mỗi 24 lượt nếu vẫn lỗi); bộ đếm nằm ở bảng `source_state`.
 - Chỉ bài **gửi thành công** mới được ghi vào D1; bài lỗi sẽ thử lại ở lượt sau.
 - **Mỗi lượt gửi 10 bài mới nhất chưa gửi** (so với D1). Đủ 10 thì dừng; chưa đủ thì lấy sâu xuống các bài cũ hơn trong feed. Không giới hạn tuổi bài, nên lúc đầu có backlog thì cứ 10 bài/giờ cho tới khi hết.
 - HTTP 429/503 được retry theo `Retry-After`.
@@ -58,7 +58,9 @@ Yêu cầu: Node 22+, tài khoản Cloudflare **gói Workers Paid** (bot cần n
 4. **Secret của Worker:**
    ```sh
    npx wrangler secret put GOOGLE_CHAT_WEBHOOK_URL
+   npx wrangler secret put OPENALEX_API_KEY   # tuỳ chọn nhưng nên có: khoá OpenAlex miễn phí (openalex.org → Settings → API key)
    ```
+   Không có khoá thì OpenAlex tính ngân sách theo IP và hay trả 429 trên Cloudflare, nguồn paper sẽ hay lỗi.
 5. **Bảo vệ trang điều khiển bằng Cloudflare Access.** Code **không có xác thực**: ai vào được trang là bấm được
    "Chạy ngay" và xem lịch sử. Hãy gắn domain riêng (hoặc workers.dev) vào một *Access application* với policy
    chỉ cho email của bạn **trước khi** deploy. `workers_dev` đang tắt, chỉ vào qua domain riêng.

@@ -34,7 +34,15 @@ function retryAfterHeader(res: Response): number | null {
 export async function fetchRetry(url: string, init: RequestInit = {}, opts: RetryOpts = {}): Promise<Response> {
   const { retries = 3, maxWaitMs = 20_000, timeoutMs = 15_000, statuses = [429, 503] } = opts;
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      // Timeout / lỗi mạng: thử lại đúng một lần rồi mới bỏ cuộc
+      if (attempt >= Math.min(retries, 1)) throw e;
+      await sleep(1000 + Math.random() * 500);
+      continue;
+    }
     if (res.ok || !statuses.includes(res.status) || attempt >= retries) return res;
 
     const wanted =

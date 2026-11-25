@@ -2,7 +2,7 @@ import { MAX_AGE_DAYS, MAX_PER_RUN, SOURCES } from './config';
 import { archiveBodies, backfillBodies } from './archive';
 import { hashUrl } from './dedupe';
 import { sendTextToGoogleChat, sendToGoogleChat } from './gchat';
-import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, releaseLock } from './history';
+import { acquireLock, getArticle, loadSeen, logToHistory, queryHistory, recordSourceResults, releaseLock } from './history';
 import { fetchSource, hydrate } from './sources';
 import type { Candidate, Env, Item } from './types';
 import { PAGE, renderArticle } from './pages';
@@ -25,13 +25,24 @@ async function notify(env: Env, text: string): Promise<void> {
 export async function run(env: Env): Promise<RunResult> {
   const errors: string[] = [];
 
-  // 1. Nguồn: mỗi nguồn độc lập
-  const results = await Promise.allSettled(SOURCES.map(fetchSource));
+  // 1. Nguồn: mỗi nguồn độc lập. Lỗi đơn lẻ (429, timeout) rất thường gặp từ IP Cloudflare nên không báo ngay:
+  //    chỉ báo khi một nguồn lỗi liên tiếp nhiều lượt (xem recordSourceResults).
+  const results = await Promise.allSettled(SOURCES.map((s) => fetchSource(s, env)));
   const all: Candidate[] = [];
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') all.push(...r.value);
-    else errors.push(`${SOURCES[i]!.name}: ${msg(r.reason)}`);
+  const outcomes = results.map((r, i) => {
+    if (r.status === 'fulfilled') {
+      all.push(...r.value);
+      return { name: SOURCES[i]!.name };
+    }
+    return { name: SOURCES[i]!.name, error: msg(r.reason) };
   });
+  const failed = outcomes.filter((o) => o.error !== undefined);
+  try {
+    for (const f of await recordSourceResults(env, outcomes)) errors.push(`${f.name}: lỗi ${f.fails} lượt liên tiếp (${f.error})`);
+  } catch (e) {
+    console.warn(`source_state: ${msg(e)}`); // D1 hỏng thì bước đọc danh sách đã gửi bên dưới sẽ báo
+  }
+  if (failed.length) console.warn(`sources failed: ${failed.map((f) => `${f.name} (${f.error})`).join('; ')}`);
 
   // 2. Dedupe bằng bảng lịch sử trong D1. Không đọc được thì không biết bài nào đã gửi → dừng để khỏi gửi trùng.
   let seen: Set<string>;
@@ -55,7 +66,7 @@ export async function run(env: Env): Promise<RunResult> {
     hashOf.set(item, hash);
     fresh.push(item);
   }
-  const base = `sources=${SOURCES.length} fetched=${all.length} new=${fresh.length}`;
+  const base = `sources=${SOURCES.length} failed=${failed.length} fetched=${all.length} new=${fresh.length}`;
 
   // 3. Mới → cũ: lấy MAX_PER_RUN bài mới nhất CHƯA gửi (đã bỏ bài có trong D1 ở trên). Đủ số thì dừng; chưa đủ thì
   //    đã lấy sâu vào các bài cũ hơn trong feed. Phần còn lại để các lượt sau. Chỉ tạo nội dung cho bài sắp gửi.

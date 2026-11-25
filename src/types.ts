@@ -1,5 +1,7 @@
 export interface Env {
   GOOGLE_CHAT_WEBHOOK_URL: string; // wrangler secret put GOOGLE_CHAT_WEBHOOK_URL
+  /** Tuỳ chọn: khoá OpenAlex miễn phí (wrangler secret put OPENALEX_API_KEY). Không có khoá thì dùng ngân sách theo IP, hay bị 429 trên Cloudflare. */
+  OPENALEX_API_KEY?: string;
   DB: D1Database; // lịch sử các bài đã gửi + dedupe + khoá chạy
 }
 

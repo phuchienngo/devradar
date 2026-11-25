@@ -32,6 +32,8 @@ const BASE = [
   'CREATE INDEX IF NOT EXISTS idx_articles_source ON articles (source, sent_at DESC)',
   // Khoá chống chạy chồng giữa cron và nút bấm; tự hết hạn phòng khi lượt chạy chết giữa chừng.
   'CREATE TABLE IF NOT EXISTS locks (name TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)',
+  // Số lượt chạy liên tiếp mà mỗi nguồn bị lỗi, để chỉ báo khi lỗi dai dẳng (lỗi 429/timeout đơn lẻ rất thường gặp từ IP Cloudflare)
+  'CREATE TABLE IF NOT EXISTS source_state (name TEXT PRIMARY KEY, fails INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT \'\', updated_at INTEGER NOT NULL DEFAULT 0)',
 ];
 
 // Full-text search (FTS5) trên tiêu đề + tóm tắt + nội dung + nguồn; bỏ dấu để "toi uu" khớp "Tối ưu".
@@ -224,4 +226,41 @@ export async function queryHistory(env: Env, { q, source, page }: HistoryQuery) 
     pageSize: PAGE_SIZE,
     hl: [HL_OPEN, HL_CLOSE],
   };
+}
+
+/** Báo khi nguồn lỗi đủ N lượt liên tiếp, rồi nhắc lại mỗi REMIND_EVERY lượt nếu vẫn lỗi. */
+const NOTIFY_AFTER = 3;
+const REMIND_EVERY = 24;
+
+/**
+ * Ghi kết quả lượt chạy cho từng nguồn và trả về những nguồn cần báo lỗi (lỗi liên tiếp đủ NOTIFY_AFTER lượt).
+ * Nguồn thành công thì đặt lại bộ đếm.
+ */
+export async function recordSourceResults(
+  env: Env,
+  results: { name: string; error?: string }[],
+): Promise<{ name: string; error: string; fails: number }[]> {
+  await ensureSchema(env);
+  const { results: rows } = await env.DB.prepare('SELECT name, fails FROM source_state WHERE fails > 0').all<{ name: string; fails: number }>();
+  const prev = new Map(rows.map((r) => [r.name, r.fails]));
+  const now = Date.now();
+  const notify: { name: string; error: string; fails: number }[] = [];
+  const stmts: D1PreparedStatement[] = [];
+  for (const r of results) {
+    if (r.error === undefined) {
+      if (prev.has(r.name)) {
+        stmts.push(env.DB.prepare("UPDATE source_state SET fails = 0, last_error = '', updated_at = ?1 WHERE name = ?2").bind(now, r.name));
+      }
+      continue;
+    }
+    const fails = (prev.get(r.name) ?? 0) + 1;
+    stmts.push(
+      env.DB.prepare(
+        'INSERT INTO source_state (name, fails, last_error, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(name) DO UPDATE SET fails = ?2, last_error = ?3, updated_at = ?4',
+      ).bind(r.name, fails, r.error.slice(0, 300), now),
+    );
+    if (fails === NOTIFY_AFTER || (fails > NOTIFY_AFTER && (fails - NOTIFY_AFTER) % REMIND_EVERY === 0)) notify.push({ name: r.name, error: r.error, fails });
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return notify;
 }

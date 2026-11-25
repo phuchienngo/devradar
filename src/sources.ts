@@ -2,7 +2,7 @@ import { FETCH_TIMEOUT_MS, type Source } from './config';
 import { fetchRetry, USER_AGENT } from './http';
 import { fetchPapers } from './papers';
 import { decode, htmlToMarkdown, stripTags } from './text';
-import type { Candidate, Item } from './types';
+import type { Candidate, Env, Item } from './types';
 
 function tag(block: string, name: string): string | null {
   const m = block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i'));
@@ -59,8 +59,8 @@ export function hydrate({ block, hydrated, ...rest }: Candidate): Item {
   return { ...rest, snippet: stripTags(body).slice(0, 500), content };
 }
 
-export async function fetchSource(src: Source): Promise<Candidate[]> {
-  if (src.type === 'papers') return fetchPapers(src);
+export async function fetchSource(src: Source, env?: Pick<Env, 'OPENALEX_API_KEY'>): Promise<Candidate[]> {
+  if (src.type === 'papers') return fetchPapers(src, env?.OPENALEX_API_KEY);
   const res = await fetchRetry(
     src.url,
     {
