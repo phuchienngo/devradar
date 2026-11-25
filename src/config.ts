@@ -83,6 +83,29 @@ export const BLOGS: Source[] = [
   rss('Etsy Code as Craft', 'https://www.etsy.com/codeascraft/rss', 'backend'),
   rss('LY Corp (LINE)', 'https://techblog.lycorp.co.jp/en/feed/index.xml', 'backend'),
 
+  // ---- Cơ sở dữ liệu / cloud / DevOps (thêm sau, đã kiểm tra feed còn hoạt động) ----
+  rss('MongoDB', 'https://www.mongodb.com/blog/rss', 'backend'),
+  rss('Elastic', 'https://www.elastic.co/blog/feed', 'backend'),
+  rss('Percona', 'https://www.percona.com/blog/feed/', 'backend'),
+  rss('Neon (Postgres)', 'https://neon.tech/blog/rss.xml', 'backend'),
+  rss('Supabase', 'https://supabase.com/rss.xml', 'backend'),
+  rss('Google Cloud Databases', 'https://cloudblog.withgoogle.com/products/databases/rss/', 'backend'),
+  rss('AWS Database', 'https://aws.amazon.com/blogs/database/feed/', 'backend'),
+  rss('AWS Compute', 'https://aws.amazon.com/blogs/compute/feed/', 'backend'),
+  rss('AWS Open Source', 'https://aws.amazon.com/blogs/opensource/feed/', 'backend'),
+  rss('Datadog', 'https://www.datadoghq.com/blog/index.xml', 'backend'),
+  rss('HashiCorp', 'https://www.hashicorp.com/blog/feed.xml', 'backend'),
+  rss('Docker', 'https://www.docker.com/feed/', 'backend'),
+
+  // ---- Engineering blog công ty / kiến trúc / Java ----
+  rss('Zalando Engineering', 'https://engineering.zalando.com/atom.xml', 'backend'),
+  rss('Booking.com (Medium)', 'https://medium.com/feed/booking-com-development', 'backend'),
+  rss('Atlassian Engineering', 'https://www.atlassian.com/engineering/feed', 'backend'),
+  rss('Sourcegraph', 'https://sourcegraph.com/blog/rss.xml', 'backend'),
+  rss('Martin Fowler', 'https://martinfowler.com/feed.atom', 'backend'),
+  rss('Baeldung', 'https://www.baeldung.com/feed', 'backend'),
+  rss('Vlad Mihalcea (JPA/Hibernate)', 'https://vladmihalcea.com/feed/', 'backend'),
+
   // ---- AI ----
   rss('OpenAI Engineering', 'https://openai.com/news/engineering/rss.xml', 'ai'),
   rss('Hugging Face', 'https://huggingface.co/blog/feed.xml', 'ai'),
