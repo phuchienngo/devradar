@@ -59,6 +59,10 @@ export const BLOGS: Source[] = [
   rss('Zig Devlog', 'https://ziglang.org/devlog/index.xml', 'backend'),
   rss('Rust', 'https://blog.rust-lang.org/feed.xml', 'backend'),
 
+  // ---- Vert.x ----
+  rss('Vert.x blog', 'https://vertx.io/feed/atom.xml', 'backend'),
+  rss('Vert.x releases', 'https://github.com/eclipse-vertx/vert.x/releases.atom', 'backend'),
+
   // ---- gRPC / Protobuf / API ----
   rss('gRPC', 'https://grpc.io/blog/index.xml', 'backend'),
   rss('Buf (Protobuf)', 'https://buf.build/blog/rss.xml', 'backend'),
