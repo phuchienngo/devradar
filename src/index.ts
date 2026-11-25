@@ -178,8 +178,16 @@ export default {
     }
     if (url.pathname === '/history' && req.method === 'GET') {
       try {
-        const page = Number(url.searchParams.get('page')) || 1;
-        const data = await queryHistory(env, { q: (url.searchParams.get('q') ?? '').slice(0, 100), source: url.searchParams.get('source') ?? '', sent: ['0', '1'].includes(url.searchParams.get('sent') ?? '') ? (url.searchParams.get('sent') as '0' | '1') : '', page });
+        const get = (k: string) => url.searchParams.get(k) ?? '';
+        const data = await queryHistory(env, {
+          q: get('q').slice(0, 100),
+          source: get('source'),
+          sent: get('sent') === '0' ? '0' : get('sent') === '1' ? '1' : '',
+          page: Number(get('page')) || 1,
+          channel: ['backend', 'ai', 'security', 'paper'].includes(get('channel')) ? get('channel') : '',
+          days: [7, 30, 90, 365].includes(Number(get('days'))) ? Number(get('days')) : 0,
+          sort: get('sort') === 'rel' ? 'rel' : 'new',
+        });
         return Response.json(data, { headers: { 'cache-control': 'no-store' } });
       } catch (e) {
         return Response.json({ error: msg(e) }, { status: 500 });

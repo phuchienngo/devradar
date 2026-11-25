@@ -209,6 +209,12 @@ interface HistoryQuery {
   /** '' = tất cả, '1' = đã gửi, '0' = chưa gửi. */
   sent: '' | '0' | '1';
   page: number; // bắt đầu từ 1
+  /** '' = mọi kênh. */
+  channel: string;
+  /** Chỉ lấy bài trong N ngày gần đây; 0 = không giới hạn. */
+  days: number;
+  /** 'rel' = độ liên quan (chỉ có tác dụng khi có từ khoá), còn lại = mới nhất. */
+  sort: 'new' | 'rel';
 }
 
 export const PAGE_SIZE = 30;
@@ -227,7 +233,9 @@ export function toFtsQuery(q: string): string {
 const HL_OPEN = '\uE000';
 const HL_CLOSE = '\uE001';
 
-export async function queryHistory(env: Env, { q, source, sent, page }: HistoryQuery) {
+const DATE_EXPR = 'MIN(COALESCE(%a.published_at, %a.sent_at), %a.sent_at)';
+
+export async function queryHistory(env: Env, { q, source, sent, page, channel, days, sort }: HistoryQuery) {
   await ensureSchema(env);
   const offset = (Math.max(1, page) - 1) * PAGE_SIZE;
   const fts = /^https?:\/\/|\//i.test(q) ? '' : toFtsQuery(q); // có dấu "/" thì coi là tìm theo link
@@ -236,8 +244,11 @@ export async function queryHistory(env: Env, { q, source, sent, page }: HistoryQ
   let rowsStmt: D1PreparedStatement;
   let countStmt: D1PreparedStatement;
   if (fts) {
-    const src = `${source ? 'AND a.source = ?' : ''} ${sent ? 'AND a.sent = ?' : ''}`;
-    const srcArgs = [...(source ? [source] : []), ...(sent ? [Number(sent)] : [])];
+    const date = DATE_EXPR.replaceAll('%a.', 'a.');
+    const src = `${source ? 'AND a.source = ?' : ''} ${sent ? 'AND a.sent = ?' : ''} ${channel ? 'AND a.channel = ?' : ''} ${days ? `AND ${date} >= ?` : ''}`;
+    const srcArgs = [...(source ? [source] : []), ...(sent ? [Number(sent)] : []), ...(channel ? [channel] : []), ...(days ? [Date.now() - days * 86_400_000] : [])];
+    // bm25: số càng nhỏ càng liên quan; tiêu đề nặng hơn tóm tắt, tóm tắt nặng hơn nội dung
+    const order = sort === 'rel' ? `bm25(articles_fts, 10.0, 3.0, 1.0, 0.0), ${date} DESC` : `${date} DESC`;
     rowsStmt = env.DB.prepare(
       `SELECT a.id, a.url, a.title, a.summary, a.source, a.channel, a.published_at AS publishedAt, a.sent_at AS sentAt, a.sent,
               a.body <> '' AS archived,
@@ -245,7 +256,7 @@ export async function queryHistory(env: Env, { q, source, sent, page }: HistoryQ
                    ELSE snippet(articles_fts, 1, '${HL_OPEN}', '${HL_CLOSE}', '…', 24) END AS excerpt
        FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
        WHERE articles_fts MATCH ? ${src}
-       ORDER BY MIN(COALESCE(a.published_at, a.sent_at), a.sent_at) DESC, a.id LIMIT ? OFFSET ?`,
+       ORDER BY ${order}, a.id LIMIT ? OFFSET ?`,
     ).bind(fts, ...srcArgs, PAGE_SIZE, offset);
     countStmt = env.DB.prepare(
       `SELECT COUNT(*) AS n FROM articles_fts JOIN articles a ON a.rowid = articles_fts.rowid
@@ -265,6 +276,14 @@ export async function queryHistory(env: Env, { q, source, sent, page }: HistoryQ
     if (sent) {
       where.push('sent = ?');
       args.push(Number(sent));
+    }
+    if (channel) {
+      where.push('channel = ?');
+      args.push(channel);
+    }
+    if (days) {
+      where.push(`${DATE_EXPR.replaceAll('%a.', '')} >= ?`);
+      args.push(Date.now() - days * 86_400_000);
     }
     const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
     rowsStmt = env.DB.prepare(
