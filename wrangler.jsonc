@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "devradar",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // Chỉ chạy bằng cron: tắt URL công khai
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+  "vars": {
+    "TELEGRAM_CHAT_ID": "7369396966"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "0cade1f069934a0ea262fb9f9974d98a"
+    }
+  ]
+}

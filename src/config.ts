@@ -1,0 +1,106 @@
+export type Channel = 'backend' | 'ai' | 'releases' | 'digest';
+
+export interface Source {
+  name: string;
+  type: 'rss' | 'atom';
+  url: string;
+  channel: Channel;
+  /** Tắt một nguồn bằng enabled: false. */
+  enabled: boolean;
+}
+
+const rss = (name: string, url: string, channel: Channel, enabled = true): Source => ({
+  name,
+  type: 'rss',
+  url,
+  channel,
+  enabled,
+});
+
+/**
+ * Engineering blogs của các công ty/tổ chức lớn. Nguồn: tuan3w/awesome-tech-rss (feeds.opml)
+ * + blog chính thức của stack (Spring, Kotlin, Go). Không có blog cá nhân/newsletter/học thuật.
+ * Tất cả đều bật (đang dùng Workers Paid nên không lo giới hạn 50 subrequest của gói free).
+ */
+export const BLOGS: Source[] = [
+  // ---- Backend / hạ tầng ----
+  rss('Cloudflare', 'https://blog.cloudflare.com/rss/', 'backend'),
+  rss('Netflix Tech', 'https://netflixtechblog.com/feed', 'backend'),
+  rss('Engineering at Meta', 'https://engineering.fb.com/feed/', 'backend'),
+  rss('GitHub Engineering', 'https://github.blog/engineering/feed/', 'backend'),
+  rss('Stripe', 'https://stripe.com/blog/feed.rss', 'backend'),
+  rss('Slack Engineering', 'https://slack.engineering/feed', 'backend'),
+  rss('Dropbox Tech', 'https://dropbox.tech/feed', 'backend'),
+  rss('Spotify Engineering', 'https://engineering.atspotify.com/feed/', 'backend'),
+  rss('Shopify Engineering', 'https://shopifyengineering.myshopify.com/blogs/engineering.atom', 'backend'),
+  rss('Airbnb Tech (Medium)', 'https://medium.com/feed/airbnb-engineering', 'backend'),
+  rss('Discord', 'https://discord.com/blog/rss.xml', 'backend'),
+  rss('AWS Architecture', 'https://aws.amazon.com/blogs/architecture/feed/', 'backend'),
+  rss('Grab Tech', 'https://engineering.grab.com/feed.xml', 'backend'),
+  rss('Pinterest Engineering (Medium)', 'https://medium.com/feed/pinterest-engineering', 'backend'),
+  rss('eBay Tech', 'http://www.ebaytechblog.com/feed/', 'backend'),
+  rss('Airtable Engineering (Medium)', 'https://medium.com/feed/airtable-eng', 'backend'),
+  rss('Medium Engineering', 'https://medium.com/feed/medium-eng', 'backend'),
+  rss('Canva Engineering', 'https://www.canva.dev/blog/engineering/feed.xml', 'backend'),
+  rss('Redis', 'https://redis.io/blog/feed/', 'backend'),
+  rss('Signal', 'https://signal.org/blog/rss.xml', 'backend'),
+
+  // ---- Stack chính thức (Java / Kotlin / Go) ----
+  rss('Spring', 'https://spring.io/blog.atom', 'backend'),
+  rss('Kotlin (JetBrains)', 'https://blog.jetbrains.com/kotlin/feed/', 'backend'),
+  rss('Go', 'https://go.dev/blog/feed.atom', 'backend'),
+
+  // ---- Java / Kotlin / Go / Zig / Rust (blog chính thức) ----
+  rss('Inside Java (OpenJDK)', 'https://inside.java/feed.xml', 'backend'),
+  rss('Quarkus', 'https://quarkus.io/feed.xml', 'backend'),
+  rss('Foojay (Java community)', 'https://foojay.io/feed/', 'backend'),
+  rss('Ktor', 'https://blog.jetbrains.com/ktor/feed/', 'backend'),
+  rss('Zig News', 'https://ziglang.org/news/index.xml', 'backend'),
+  rss('Zig Devlog', 'https://ziglang.org/devlog/index.xml', 'backend'),
+  rss('Rust', 'https://blog.rust-lang.org/feed.xml', 'backend'),
+
+  // ---- gRPC / Protobuf / API ----
+  rss('gRPC', 'https://grpc.io/blog/index.xml', 'backend'),
+  rss('Buf (Protobuf)', 'https://buf.build/blog/rss.xml', 'backend'),
+
+  // ---- Dữ liệu / streaming ----
+  rss('Debezium', 'https://debezium.io/blog.atom', 'backend'),
+  rss('Redpanda', 'https://www.redpanda.com/blog/rss.xml', 'backend'),
+  rss('PlanetScale', 'https://planetscale.com/blog/feed.atom', 'backend'),
+  rss('ClickHouse', 'https://clickhouse.com/rss.xml', 'backend'),
+  rss('Planet PostgreSQL', 'https://planet.postgresql.org/rss20.xml', 'backend'),
+
+  // ---- Hạ tầng / observability ----
+  rss('Kubernetes', 'https://kubernetes.io/feed.xml', 'backend'),
+  rss('OpenTelemetry', 'https://opentelemetry.io/blog/index.xml', 'backend'),
+  rss('Grafana', 'https://grafana.com/blog/index.xml', 'backend'),
+  rss('Fly.io', 'https://fly.io/blog/feed.xml', 'backend'),
+
+  // ---- Engineering blog công ty ----
+  rss('Lyft Engineering', 'https://eng.lyft.com/feed', 'backend'),
+  rss('Instacart', 'https://tech.instacart.com/feed', 'backend'),
+  rss('Figma', 'https://www.figma.com/blog/feed/atom.xml', 'backend'),
+  rss('Etsy Code as Craft', 'https://www.etsy.com/codeascraft/rss', 'backend'),
+  rss('LY Corp (LINE)', 'https://techblog.lycorp.co.jp/en/feed/index.xml', 'backend'),
+
+  // ---- AI ----
+  rss('OpenAI Engineering', 'https://openai.com/news/engineering/rss.xml', 'ai'),
+  rss('Hugging Face', 'https://huggingface.co/blog/feed.xml', 'ai'),
+  rss('Google Research', 'https://research.google/blog/rss/', 'ai'),
+  rss('DeepMind', 'https://deepmind.com/blog/feed/basic/', 'ai'),
+  rss('Nvidia Developer', 'https://developer.nvidia.com/blog/feed', 'ai'),
+  rss('PyTorch', 'https://pytorch.org/feed', 'ai'),
+  rss('Amazon Science', 'https://www.amazon.science/index.rss', 'ai'),
+];
+
+export const ENABLED_BLOGS = BLOGS.filter((s) => s.enabled);
+
+export const SOURCES: Source[] = ENABLED_BLOGS;
+
+/** Tối đa số bài gửi mỗi lần chạy (mỗi bài 1 tin/sink, ~1,1s/tin). Phần dư để lần sau. Workers Paid: 10.000 subrequest. */
+export const MAX_PER_RUN = 30;
+/** Bỏ bài cũ hơn N ngày (nếu parse được ngày). */
+export const MAX_AGE_DAYS = 3;
+/** Số hash giữ trong key `seen` (FIFO). */
+export const SEEN_LIMIT = 3000;
+export const FETCH_TIMEOUT_MS = 15000;
